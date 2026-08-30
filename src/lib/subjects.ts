@@ -519,3 +519,85 @@ export function getSubjectMeta(subjectName: string): SubjectBadgeMeta {
     borderClass: "border-slate-200",
   };
 }
+
+/**
+ * Maps exam subject names to study page slugs.
+ * Extracts the subject from exam names like "Math Class Test" -> "math"
+ */
+export function getSubjectSlugFromExam(examName: string): string {
+  if (!examName) return "";
+  
+  const canonical = resolveCanonicalSubject(examName);
+  const found = MASTER_SUBJECTS.find((s) => s.name.toLowerCase() === canonical.toLowerCase());
+  
+  if (found) {
+    // Map canonical names to slugs used in mock-data (12 default subjects)
+    const slugMap: Record<string, string> = {
+      "Mathematics": "math",
+      "English Language": "english-lang",
+      "English Literature": "english-lit",
+      "Science": "science",
+      "Social Studies": "bgs",
+      "Computer Science": "ict",
+      "Bangla": "bangla",
+      "Bangla 2nd Paper": "bangla-2nd",
+      "Islamic Studies": "religion",
+      "Geography": "geography",
+      "Arabic": "arabic",
+      "History": "history",
+    };
+    
+    return slugMap[found.name] || found.name.toLowerCase().replace(/\s+/g, "-");
+  }
+  
+  // Fallback: try to extract from exam name directly
+  const lower = examName.toLowerCase();
+  if (lower.includes("math")) return "math";
+  if (lower.includes("english lit") || lower.includes("literature")) return "english-lit";
+  if (lower.includes("english") || lower.includes("lang")) return "english-lang";
+  if (lower.includes("science")) return "science";
+  if (lower.includes("bangla 2") || lower.includes("bangla 2nd")) return "bangla-2nd";
+  if (lower.includes("bangla")) return "bangla";
+  if (lower.includes("bgs") || lower.includes("social")) return "bgs";
+  if (lower.includes("ict") || lower.includes("computer")) return "ict";
+  if (lower.includes("religion") || lower.includes("islam")) return "religion";
+  if (lower.includes("geography") || lower.includes("geo")) return "geography";
+  if (lower.includes("arabic") || lower.includes("arab")) return "arabic";
+  if (lower.includes("history") || lower.includes("itihas")) return "history";
+  
+  return "";
+}
+
+/**
+ * Parses chapter numbers from exam syllabus strings.
+ * Examples:
+ * - "Chapter 3" -> [3]
+ * - "Chapter- 3 & 4" -> [3, 4]
+ * - "Chapter 1-3" -> [1, 3]
+ * - "Chapters 1, 2, 3" -> [1, 2, 3]
+ * - "Chapter 1, 3 & 5" -> [1, 3, 5]
+ * - "Part- 1 Chapter: 3 & 4" -> [3, 4] (ignores part numbers)
+ */
+export function parseChapterNumbers(text: string): number[] {
+  if (!text) return [];
+  const numbers: number[] = [];
+  
+  // Match patterns like "Chapter: 3 & 4", "Chapter 2", "Chapters 1, 3"
+  const chapterRegex = /(?:chapter|ch)[s.:\s-]*([0-9\s,&-]+)/gi;
+  let match;
+  
+  while ((match = chapterRegex.exec(text)) !== null) {
+    const digits = match[1].match(/\d+/g);
+    if (digits) {
+      numbers.push(...digits.map(Number));
+    }
+  }
+
+  // Fallback: If no explicit "chapter" keyword is found, extract all digits
+  if (numbers.length === 0) {
+    const allDigits = text.match(/\d+/g);
+    if (allDigits) numbers.push(...allDigits.map(Number));
+  }
+
+  return Array.from(new Set(numbers)).sort((a, b) => a - b);
+}

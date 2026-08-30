@@ -15,6 +15,7 @@ import {
   formatDaysRemaining,
   getDateCategory,
 } from "@/lib/school-content";
+import { getSubjectMeta, getSubjectSlugFromExam, parseChapterNumbers } from "@/lib/subjects";
 
 export const Route = createFileRoute("/dashboard")({
   head: () => ({
@@ -175,25 +176,120 @@ function Dashboard() {
 
         <TodayRoutineCard />
 
-        <SectionCard title={t("Exams", "পরীক্ষা")}>
+        <SectionCard
+          title={t("Exams", "পরীক্ষা")}
+          hint={
+            <Link
+              to="/exams"
+              className="group inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-blue-50 to-indigo-50 border border-indigo-100/70 px-3.5 py-1 text-xs font-bold text-indigo-600 shadow-[0_2px_8px_-2px_rgba(79,70,229,0.12)] hover:border-indigo-200 hover:shadow-indigo-500/15 active:scale-95 transition-all"
+            >
+              <span>{t("All", "সব")}</span>
+              <ChevronRight className="size-3.5 transition-transform duration-200 group-hover:translate-x-0.5" />
+            </Link>
+          }
+        >
           {!exams || exams.length === 0 ? (
             <p className="text-xs text-muted-foreground">
               {t("No upcoming exams", "কোনো আসন্ন পরীক্ষা নেই")}
             </p>
           ) : (
             <ul className="space-y-2">
-              {exams.slice(0, 2).map((e) => {
-                const daysRemaining = calculateDaysRemaining(e.date);
-                return (
-                  <li key={e.id} className="rounded-2xl bg-muted p-2">
-                    <p className="text-xs font-bold leading-tight">{e.name}</p>
-                    <p className="mt-1 text-[11px] text-muted-foreground">{e.chapter}</p>
-                    <p className="mt-1 text-sm font-extrabold text-destructive">
-                      {formatDaysRemaining(daysRemaining)}
-                    </p>
-                  </li>
-                );
-              })}
+              {[...exams]
+                .filter((e) => new Date(e.date).getTime() >= new Date().setHours(0, 0, 0, 0))
+                .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+                .slice(0, 2)
+                .map((e) => {
+                  const daysRemaining = calculateDaysRemaining(e.date);
+                  const subjectMeta = getSubjectMeta(e.name);
+                  
+                  // Format date for display (e.g., "15 Jan")
+                  const examDate = new Date(e.date);
+                  const formattedDate = `${examDate.getDate()} ${examDate.toLocaleString('default', { month: 'short' })}`;
+                  
+                  // Determine urgency styling
+                  let urgencyBg, urgencyText, urgencyIcon;
+                  if (daysRemaining <= 3) {
+                    urgencyBg = "bg-red-50";
+                    urgencyText = "text-red-600";
+                    urgencyIcon = "🔥";
+                  } else if (daysRemaining <= 7) {
+                    urgencyBg = "bg-amber-50";
+                    urgencyText = "text-amber-600";
+                    urgencyIcon = "⏳";
+                  } else {
+                    urgencyBg = "bg-blue-50";
+                    urgencyText = "text-blue-600";
+                    urgencyIcon = "📅";
+                  }
+                  
+                  const subjectSlug = getSubjectSlugFromExam(e.name);
+                  const chapterNumbers = parseChapterNumbers(e.chapter);
+                  
+                  return (
+                    <li key={e.id}>
+                      {subjectSlug ? (
+                        <Link
+                          to="/study/$subject"
+                          params={{ subject: subjectSlug }}
+                          search={{ exam: "1", chapters: chapterNumbers.join(",") }}
+                          className="tap hover:bg-slate-50 transition cursor-pointer block rounded-2xl bg-muted p-3"
+                        >
+                          <div className="flex items-start gap-3">
+                            {/* Left: Subject icon and info */}
+                            <div className="flex items-center gap-3 flex-1">
+                              <div className={`size-10 rounded-full ${subjectMeta.bgClass} flex items-center justify-center text-lg shadow-sm`}>
+                                {subjectMeta.emoji}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs font-bold leading-tight truncate">{e.name}</p>
+                                <p className="mt-0.5 text-[11px] text-muted-foreground truncate">{e.chapter}</p>
+                              </div>
+                            </div>
+                            
+                            {/* Right: Date and countdown */}
+                            <div className="flex flex-col items-end gap-1">
+                              <div className="flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground">
+                                <span>📅</span>
+                                <span>{formattedDate}</span>
+                              </div>
+                              <div className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${urgencyBg} ${urgencyText}`}>
+                                <span>{urgencyIcon}</span>
+                                <span>{formatDaysRemaining(daysRemaining)}</span>
+                              </div>
+                            </div>
+                          </div>
+                        </Link>
+                      ) : (
+                        <div className="rounded-2xl bg-muted p-3">
+                          <div className="flex items-start gap-3">
+                            {/* Left: Subject icon and info */}
+                            <div className="flex items-center gap-3 flex-1">
+                              <div className={`size-10 rounded-full ${subjectMeta.bgClass} flex items-center justify-center text-lg shadow-sm`}>
+                                {subjectMeta.emoji}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs font-bold leading-tight truncate">{e.name}</p>
+                                <p className="mt-0.5 text-[11px] text-muted-foreground truncate">{e.chapter}</p>
+                              </div>
+                            </div>
+                            
+                            {/* Right: Date and countdown */}
+                            <div className="flex flex-col items-end gap-1">
+                              <div className="flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground">
+                                <span>📅</span>
+                                <span>{formattedDate}</span>
+                              </div>
+                              <div className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${urgencyBg} ${urgencyText}`}>
+                                <span>{urgencyIcon}</span>
+                                <span>{formatDaysRemaining(daysRemaining)}</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}
             </ul>
           )}
         </SectionCard>

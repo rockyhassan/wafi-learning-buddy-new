@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Apple, Chrome, Mail } from "lucide-react";
+import { Apple, Globe, Mail } from "lucide-react";
 import { PageShell } from "@/components/app-shell";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -29,7 +29,7 @@ function SignUp() {
     >
       <div className="space-y-3">
         {[
-          { icon: Chrome, en: "Continue with Google", bn: "গুগল দিয়ে চালিয়ে যান" },
+          { icon: Globe, en: "Continue with Google", bn: "গুগল দিয়ে চালিয়ে যান" },
           { icon: Apple, en: "Continue with Apple", bn: "অ্যাপল দিয়ে চালিয়ে যান" },
         ].map((p) => (
           <button

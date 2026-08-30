@@ -182,15 +182,18 @@ export function SectionCard({
   hint,
   children,
   className,
+  ...props
 }: {
   title?: string;
   hint?: ReactNode;
   children: ReactNode;
   className?: string;
+  [key: string]: any;
 }) {
   return (
     <section
       className={cn("rounded-3xl border border-border bg-card p-4 shadow-soft", className)}
+      {...props}
     >
       {title ? (
         <div className="mb-3 flex items-center justify-between gap-2">

@@ -16,6 +16,7 @@ import { Route as AiTeacherRouteImport } from './routes/ai-teacher'
 import { Route as AuditRouteImport } from './routes/audit'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as DocumentsRouteImport } from './routes/documents'
+import { Route as ExamsRouteImport } from './routes/exams'
 import { Route as GamesRouteImport } from './routes/games'
 import { Route as NotificationsRouteImport } from './routes/notifications'
 import { Route as ParentDashboardRouteImport } from './routes/parent-dashboard'
@@ -76,6 +77,11 @@ const DashboardRoute = DashboardRouteImport.update({
 const DocumentsRoute = DocumentsRouteImport.update({
   id: '/documents',
   path: '/documents',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ExamsRoute = ExamsRouteImport.update({
+  id: '/exams',
+  path: '/exams',
   getParentRoute: () => rootRouteImport,
 } as any)
 const GamesRoute = GamesRouteImport.update({
@@ -217,6 +223,7 @@ export interface FileRoutesByFullPath {
   '/audit': typeof AuditRoute
   '/dashboard': typeof DashboardRoute
   '/documents': typeof DocumentsRoute
+  '/exams': typeof ExamsRoute
   '/games': typeof GamesRoute
   '/notifications': typeof NotificationsRoute
   '/parent-dashboard': typeof ParentDashboardRoute
@@ -252,6 +259,7 @@ export interface FileRoutesByTo {
   '/audit': typeof AuditRoute
   '/dashboard': typeof DashboardRoute
   '/documents': typeof DocumentsRoute
+  '/exams': typeof ExamsRoute
   '/games': typeof GamesRoute
   '/notifications': typeof NotificationsRoute
   '/parent-dashboard': typeof ParentDashboardRoute
@@ -288,6 +296,7 @@ export interface FileRoutesById {
   '/audit': typeof AuditRoute
   '/dashboard': typeof DashboardRoute
   '/documents': typeof DocumentsRoute
+  '/exams': typeof ExamsRoute
   '/games': typeof GamesRoute
   '/notifications': typeof NotificationsRoute
   '/parent-dashboard': typeof ParentDashboardRoute
@@ -325,6 +334,7 @@ export interface FileRouteTypes {
     | '/audit'
     | '/dashboard'
     | '/documents'
+    | '/exams'
     | '/games'
     | '/notifications'
     | '/parent-dashboard'
@@ -360,6 +370,7 @@ export interface FileRouteTypes {
     | '/audit'
     | '/dashboard'
     | '/documents'
+    | '/exams'
     | '/games'
     | '/notifications'
     | '/parent-dashboard'
@@ -395,6 +406,7 @@ export interface FileRouteTypes {
     | '/audit'
     | '/dashboard'
     | '/documents'
+    | '/exams'
     | '/games'
     | '/notifications'
     | '/parent-dashboard'
@@ -431,6 +443,7 @@ export interface RootRouteChildren {
   AuditRoute: typeof AuditRoute
   DashboardRoute: typeof DashboardRoute
   DocumentsRoute: typeof DocumentsRoute
+  ExamsRoute: typeof ExamsRoute
   GamesRoute: typeof GamesRoute
   NotificationsRoute: typeof NotificationsRoute
   ParentDashboardRoute: typeof ParentDashboardRoute
@@ -508,6 +521,13 @@ declare module '@tanstack/react-router' {
       path: '/documents'
       fullPath: '/documents'
       preLoaderRoute: typeof DocumentsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/exams': {
+      id: '/exams'
+      path: '/exams'
+      fullPath: '/exams'
+      preLoaderRoute: typeof ExamsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/games': {
@@ -703,6 +723,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuditRoute: AuditRoute,
   DashboardRoute: DashboardRoute,
   DocumentsRoute: DocumentsRoute,
+  ExamsRoute: ExamsRoute,
   GamesRoute: GamesRoute,
   NotificationsRoute: NotificationsRoute,
   ParentDashboardRoute: ParentDashboardRoute,
