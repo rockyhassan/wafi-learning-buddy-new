@@ -14,6 +14,7 @@ export interface DiaryContentRendererProps {
   className?: string;
   blockClassName?: string;
   fallback?: ReactNode;
+  showRuledLines?: boolean;
 }
 
 /**
@@ -54,10 +55,12 @@ function BlockItem({
   block,
   index,
   blockClassName = "",
+  showRuledLines = true,
 }: {
   block: TextBlock;
   index: number;
   blockClassName?: string;
+  showRuledLines?: boolean;
 }) {
   const isBold = block.marks?.includes("bold");
   const isItalic = block.marks?.includes("italic");
@@ -70,12 +73,18 @@ function BlockItem({
         ? "text-right"
         : "text-left";
 
+  // Apply ruled notebook line styling by default
+  const ruledLineClasses = showRuledLines
+    ? "min-h-[2.25rem] py-1.5 border-b border-sky-100 dark:border-sky-900/40"
+    : "";
+
   const blockClasses = cn(
     alignClass,
     isBold && "font-bold text-slate-900 dark:text-white",
     isItalic && "italic",
     isUnderline && "underline",
-    blockClassName
+    blockClassName,
+    ruledLineClasses
   );
 
   const segments = parseInlineSegments(block.text || "", {
@@ -130,6 +139,7 @@ export function DiaryContentRenderer({
   className = "",
   blockClassName = "",
   fallback = null,
+  showRuledLines = true,
 }: DiaryContentRendererProps) {
   if (!hasRichTextContent(content)) {
     if (fallback !== null && fallback !== undefined) {
@@ -143,13 +153,14 @@ export function DiaryContentRenderer({
     const parsed = parseRichText(content);
     if (parsed && Array.isArray(parsed.blocks) && parsed.blocks.length > 0) {
       return (
-        <div className={cn("space-y-1", className)}>
+        <div className={cn("space-y-0", className)}>
           {parsed.blocks.map((block, idx) => (
             <BlockItem
               key={idx}
               block={block}
               index={idx}
               blockClassName={blockClassName}
+              showRuledLines={showRuledLines}
             />
           ))}
         </div>
@@ -161,12 +172,17 @@ export function DiaryContentRenderer({
   const rawString = typeof content === "string" ? content : String(content ?? "");
   const lines = rawString.split("\n");
 
+  // Apply ruled notebook line styling
+  const ruledLineClasses = showRuledLines
+    ? "min-h-[2.25rem] py-1.5 border-b border-sky-100 dark:border-sky-900/40"
+    : "";
+
   return (
-    <div className={cn("space-y-1", className)}>
+    <div className={cn("space-y-0", className)}>
       {lines.map((line, idx) => {
         const segments = parseInlineSegments(line);
         return (
-          <div key={idx} className={blockClassName}>
+          <div key={idx} className={cn(blockClassName, ruledLineClasses)}>
             <RenderSegments segments={segments} keyPrefix={`plain-${idx}`} />
           </div>
         );

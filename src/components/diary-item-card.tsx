@@ -46,35 +46,38 @@ export function DiaryItemCard({ entry, className = "" }: DiaryItemCardProps) {
         {hasContent && (
           <div className="mt-2 space-y-1.5">
             {hasCw && (
-              <div className="flex items-start gap-2">
-                <span className="inline-flex items-center shrink-0 rounded bg-blue-50 px-1.5 py-0.5 text-xs font-bold text-blue-700 border border-blue-100/80">
+              <div className="flex items-center gap-2.5 min-h-[2.25rem] py-1.5 border-b border-sky-100 dark:border-sky-900/40">
+                <span className="inline-flex items-center shrink-0 self-center rounded bg-blue-50 px-1.5 py-0.5 text-xs font-bold text-blue-700 border border-blue-100/80">
                   {t("C.W", "সি.ডব্লু")}:
                 </span>
                 <DiaryContentRenderer
                   content={entry.cw}
                   className="text-sm text-slate-700 leading-snug break-words flex-1 font-normal"
+                  showRuledLines={false}
                 />
               </div>
             )}
             {hasHw && (
-              <div className="flex items-start gap-2">
-                <span className="inline-flex items-center shrink-0 rounded bg-amber-50 px-1.5 py-0.5 text-xs font-bold text-amber-700 border border-amber-100/80">
+              <div className="flex items-center gap-2.5 min-h-[2.25rem] py-1.5 border-b border-sky-100 dark:border-sky-900/40">
+                <span className="inline-flex items-center shrink-0 self-center rounded bg-amber-50 px-1.5 py-0.5 text-xs font-bold text-amber-700 border border-amber-100/80">
                   {t("H.W", "এইচ.ডব্লু")}:
                 </span>
                 <DiaryContentRenderer
                   content={entry.hw}
                   className="text-sm text-slate-700 leading-snug break-words flex-1 font-normal"
+                  showRuledLines={false}
                 />
               </div>
             )}
             {hasRemarks && (
-              <div className="flex items-start gap-2">
-                <span className="inline-flex items-center shrink-0 rounded bg-purple-50 px-1.5 py-0.5 text-xs font-bold text-purple-700 border border-purple-100/80">
+              <div className="flex items-center gap-2.5 min-h-[2.25rem] py-1.5 border-b border-sky-100 dark:border-sky-900/40">
+                <span className="inline-flex items-center shrink-0 self-center rounded bg-purple-50 px-1.5 py-0.5 text-xs font-bold text-purple-700 border border-purple-100/80">
                   {t("Remarks", "মন্তব্য")}:
                 </span>
                 <DiaryContentRenderer
                   content={entry.remarks}
                   className="text-sm text-slate-700 leading-snug break-words flex-1 font-normal"
+                  showRuledLines={false}
                 />
               </div>
             )}
