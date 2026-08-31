@@ -67,8 +67,8 @@
   --color-warning-foreground: var(--warning-foreground);
   --color-info: var(--info);
   --color-info-foreground: var(--info-foreground);
-  --font-display: "Baloo 2", "Hind Siliguri", system-ui, sans-serif;
-  --font-sans: "Hind Siliguri", "Baloo 2", system-ui, sans-serif;
+  --font-display: "Baloo 2", "Noto Sans Bengali", "Hind Siliguri", system-ui, sans-serif;
+  --font-sans: "Noto Sans Bengali", "Hind Siliguri", "Baloo 2", system-ui, sans-serif;
 }
 
 :root {

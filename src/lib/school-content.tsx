@@ -248,6 +248,37 @@ export function getDateCategory(dateStr: string): "today" | "yesterday" | "older
   }
 }
 
+/**
+ * Normalize Bengali text and digits, fixing common OCR/font encoding artifacts.
+ * Handles issues where Bengali digits become corrupted glyphs (e.g., 'c०' -> '१०').
+ * 
+ * Common patterns fixed:
+ * - 'c०' (Latin c + artifact) -> '१०' (Bengali 1 + 0)
+ * - 'c0' (Latin c + English zero) -> '१०' (Bengali 1 + 0)
+ * - 'c' followed by Bengali/English digit -> '१' (Bengali 1)
+ * - Context-aware: fixes 'c' in phrases like "পৃষ্ঠা c25" -> "পৃষ্ঠা १२५"
+ */
+export function normalizeBanglaTextAndDigits(text: string): string {
+  if (!text) return "";
+  
+  let result = text;
+  
+  // Fix common OCR / font encoding artifact where '১' becomes 'c' before Bengali/English zeros or digits
+  // Pattern 1: c followed by Bengali or English digits: 'c५' -> '१५', 'c5' -> '१५'
+  result = result.replace(/\bc([०-৯0-9])/g, "१$1");
+  
+  // Pattern 2: Context-aware fix for phrases like "পৃষ্ঠা c25" (page c25)
+  result = result.replace(/([পাঠঅধ্যায়পৃষ্ঠা])\s*c([०-৯0-9])/gi, "$1 १$2");
+  
+  // Pattern 3: Fix standalone 'c०' -> '१०' (c + Devanagari/artifact zero)
+  result = result.replace(/c०/gi, "१०");
+  
+  // Pattern 4: Fix standalone 'c0' -> '१०' (c + English zero)
+  result = result.replace(/c0/gi, "१०");
+  
+  return result;
+}
+
 const seedDiary: DiaryEntry[] = [];
 
 const seedRoutine: RoutineEntry[] = [];
@@ -294,45 +325,46 @@ function getFieldLabel(line: string): "cw" | "hw" | "remarks" | null {
  * "Remarks: content" → "content"
  */
 function extractFieldContent(line: string, label: "cw" | "hw" | "remarks"): string {
+  let content = "";
   const trimmed = line.trim();
 
   // For C.W variants
   if (label === "cw") {
     if (/^c\.w/i.test(trimmed)) {
-      return trimmed.replace(/^c\.w\s*[:\-]?\s*(\([^)]*\)\s*[:\-]?\s*)?/i, "").trim();
-    }
-    if (/^class\s+work/i.test(trimmed)) {
-      return trimmed.replace(/^class\s+work\s*[:\-]?\s*/i, "").trim();
+      content = trimmed.replace(/^c\.w\s*[:\-]?\s*(\([^)]*\)\s*[:\-]?\s*)?/i, "").trim();
+    } else if (/^class\s+work/i.test(trimmed)) {
+      content = trimmed.replace(/^class\s+work\s*[:\-]?\s*/i, "").trim();
     }
   }
 
   // For H.W variants
   if (label === "hw") {
     if (/^h\.w/i.test(trimmed)) {
-      return trimmed.replace(/^h\.w\s*[:\-]?\s*(\([^)]*\)\s*[:\-]?\s*)?/i, "").trim();
-    }
-    if (/^home\s+work/i.test(trimmed)) {
-      return trimmed.replace(/^home\s+work\s*[:\-]?\s*/i, "").trim();
+      content = trimmed.replace(/^h\.w\s*[:\-]?\s*(\([^)]*\)\s*[:\-]?\s*)?/i, "").trim();
+    } else if (/^home\s+work/i.test(trimmed)) {
+      content = trimmed.replace(/^home\s+work\s*[:\-]?\s*/i, "").trim();
     }
   }
 
   // For Remarks variants
   if (label === "remarks") {
     if (/^remarks?/i.test(trimmed)) {
-      return trimmed.replace(/^remarks?\s*[:\-]?\s*(\([^)]*\)\s*[:\-]?\s*)?/i, "").trim();
-    }
-    if (/^notes?/i.test(trimmed)) {
-      return trimmed.replace(/^notes?\s*[:\-]?\s*(\([^)]*\)\s*[:\-]?\s*)?/i, "").trim();
-    }
-    if (/^r(\.|:|\s*-)/i.test(trimmed) || /^r\s*\(/i.test(trimmed)) {
-      return trimmed.replace(/^r(\s*\([^)]*\))?\s*[:\.\-]?\s*/i, "").trim();
-    }
-    if (/^মন্তব্য/i.test(trimmed)) {
-      return trimmed.replace(/^মন্তব্য\s*[:\-]?\s*(\([^)]*\)\s*[:\-]?\s*)?/i, "").trim();
+      content = trimmed.replace(/^remarks?\s*[:\-]?\s*(\([^)]*\)\s*[:\-]?\s*)?/i, "").trim();
+    } else if (/^notes?/i.test(trimmed)) {
+      content = trimmed.replace(/^notes?\s*[:\-]?\s*(\([^)]*\)\s*[:\-]?\s*)?/i, "").trim();
+    } else if (/^r(\.|:|\s*-)/i.test(trimmed) || /^r\s*\(/i.test(trimmed)) {
+      content = trimmed.replace(/^r(\s*\([^)]*\))?\s*[:\.\-]?\s*/i, "").trim();
+    } else if (/^মন্তব্য/i.test(trimmed)) {
+      content = trimmed.replace(/^মন্তব্য\s*[:\-]?\s*(\([^)]*\)\s*[:\-]?\s*)?/i, "").trim();
     }
   }
 
-  return trimmed;
+  if (!content) {
+    content = trimmed;
+  }
+
+  // Apply Bengali text and digit normalization to sanitize OCR artifacts
+  return normalizeBanglaTextAndDigits(content);
 }
 
 /**
@@ -435,10 +467,10 @@ export function parseDiaryText(text: string, date: string): Omit<DiaryEntry, "id
       currentEntry = {
         date,
         subject: resolveCanonicalSubject(cleanedSubject) || "General",
-        cw,
-        hw,
-        remarks: remarks || undefined,
-        answer,
+        cw: normalizeBanglaTextAndDigits(cw),
+        hw: normalizeBanglaTextAndDigits(hw),
+        remarks: remarks ? normalizeBanglaTextAndDigits(remarks) : undefined,
+        answer: normalizeBanglaTextAndDigits(answer),
       };
     }
   }
@@ -617,8 +649,17 @@ export function SchoolContentProvider({ children }: { children: ReactNode }) {
 
   const updateDiary = useCallback(
     (id: string, patch: Partial<DiaryEntry>) => {
+      // Sanitize Bengali text fields to fix OCR artifacts (e.g., 'c००' -> '१००')
       const sanitizedPatch = Object.fromEntries(
-        Object.entries(patch).filter(([_, v]) => v !== undefined)
+        Object.entries(patch)
+          .filter(([_, v]) => v !== undefined)
+          .map(([key, value]) => {
+            // Apply Bengali text normalization to relevant diary fields
+            if (key === "cw" || key === "hw" || key === "remarks" || key === "answer") {
+              return [key, typeof value === "string" ? normalizeBanglaTextAndDigits(value) : value];
+            }
+            return [key, value];
+          })
       ) as Partial<DiaryEntry>;
 
       setDiary((p) => p.map((e) => (e.id === id ? { ...e, ...sanitizedPatch } : e)));
