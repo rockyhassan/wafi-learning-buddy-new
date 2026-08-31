@@ -1,7 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Play, Volume2, Pencil, X, Check } from "lucide-react";
 import { PageShell, Pill, SectionCard } from "@/components/app-shell";
+import { NotebookSheet } from "@/components/NotebookSheet";
+import { LessonSectionLabel } from "@/components/LessonSectionLabel";
+import { DiaryContentEditor } from "@/components/DiaryContentEditor";
+import { DiaryContentRenderer } from "@/components/DiaryContentRenderer";
 import { useApp } from "@/lib/app-state";
+import { useAccess } from "@/lib/access-store";
 import { getLessonContent, type LessonDetail } from "@/lib/curriculum-data";
 import { saveEditedLesson, resetLessonToDefault, isLessonEdited } from "@/lib/lesson-storage";
 import { useState, useEffect } from "react";
@@ -24,8 +29,12 @@ export const Route = createFileRoute("/lesson/$lessonId")({
 function LessonPage() {
   const { lessonId } = Route.useParams();
   const { t, lang } = useApp();
+  const { currentUser } = useAccess();
   const [subject, chapter, lesson] = lessonId.split("-");
   const lessonData = getLessonContent(lessonId);
+  
+  // RBAC: Check if user can edit lessons
+  const canEditLesson = currentUser?.role === "admin" || currentUser?.role === "teacher";
   
   // Edit mode state
   const [editMode, setEditMode] = useState(false);
@@ -45,6 +54,14 @@ function LessonPage() {
     setHasUnsavedChanges(hasChanges);
   }, [editedContent, lessonData]);
 
+  // Force-exit edit mode if user loses permission
+  useEffect(() => {
+    if (editMode && !canEditLesson) {
+      setEditMode(false);
+      setHasUnsavedChanges(false);
+    }
+  }, [canEditLesson, editMode]);
+
   const handleSave = () => {
     saveEditedLesson(lessonId, editedContent);
     setEditMode(false);
@@ -63,8 +80,8 @@ function LessonPage() {
     setHasUnsavedChanges(false);
   };
 
-  // Edit toggle button for header
-  const editButton = (
+  // Edit toggle button for header - only render if user can edit
+  const editButton = canEditLesson ? (
     <button
       type="button"
       onClick={() => setEditMode(!editMode)}
@@ -78,7 +95,7 @@ function LessonPage() {
     >
       {editMode ? <X className="size-3.5 sm:size-4" /> : <Pencil className="size-3.5 sm:size-4" />}
     </button>
-  );
+  ) : null;
 
   return (
     <PageShell
@@ -88,64 +105,88 @@ function LessonPage() {
       action={editButton}
       hideNav={editMode}
     >
-      <SectionCard className="gradient-card">
-        <div className="flex flex-wrap gap-2">
-          <Pill tone="primary">📖 {t("Text", "পাঠ")}</Pill>
-          <Pill tone="accent">🎬 {t("Video", "ভিডিও")}</Pill>
-          <Pill tone="success">🗣️ {t("Read Aloud", "পড়ে শোনাও")}</Pill>
-        </div>
-      </SectionCard>
+      <NotebookSheet>
+        <SectionCard className="gradient-card">
+          <div className="flex flex-wrap gap-2">
+            <Pill tone="primary">📖 {t("Text", "পাঠ")}</Pill>
+            <Pill tone="accent">🎬 {t("Video", "ভিডিও")}</Pill>
+            <Pill tone="success">🗣️ {t("Read Aloud", "পড়ে শোনাও")}</Pill>
+          </div>
+        </SectionCard>
+      </NotebookSheet>
 
-      <SectionCard title={t("Lesson Text", "পাঠ")}>
-        {editMode ? (
-          <textarea
-            value={lang === "bn" && editedContent.lessonText.bn ? editedContent.lessonText.bn : editedContent.lessonText.en}
-            onChange={(e) => {
-              const field = lang === "bn" ? "bn" : "en";
-              setEditedContent({
-                ...editedContent,
-                lessonText: { ...editedContent.lessonText, [field]: e.target.value }
-              });
-            }}
-            className="w-full text-sm leading-relaxed bg-background border border-border rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-primary/40 resize-none min-h-[100px]"
-            rows={6}
-          />
-        ) : (
-          <p className="text-sm leading-relaxed">
-            {lang === "bn" && lessonData.lessonText.bn
-              ? lessonData.lessonText.bn
-              : lessonData.lessonText.en}
-          </p>
-        )}
-      </SectionCard>
+      <NotebookSheet>
+        <SectionCard
+          hint={<LessonSectionLabel emoji="📖" title={t("Lesson Text", "পাঠ")} variant="primary" />}
+        >
+          {editMode ? (
+            <DiaryContentEditor
+              value={lang === "bn" && editedContent.lessonText.bn ? editedContent.lessonText.bn : editedContent.lessonText.en}
+              onChange={(value) => {
+                const field = lang === "bn" ? "bn" : "en";
+                setEditedContent({
+                  ...editedContent,
+                  lessonText: { ...editedContent.lessonText, [field]: value }
+                });
+              }}
+              placeholder={t("Enter lesson text...", "পাঠ লিখুন...")}
+              rows={4}
+            />
+          ) : (
+            <DiaryContentRenderer
+              content={lang === "bn" && lessonData.lessonText.bn
+                ? lessonData.lessonText.bn
+                : lessonData.lessonText.en}
+              blockClassName="text-sm leading-relaxed text-slate-800 dark:text-slate-100"
+            />
+          )}
+        </SectionCard>
+      </NotebookSheet>
 
-      <SectionCard title={t("Bangla Explanation", "বাংলা ব্যাখ্যা")}>
-        {editMode ? (
-          <textarea
-            value={editedContent.banglaExplanation}
-            onChange={(e) => setEditedContent({ ...editedContent, banglaExplanation: e.target.value })}
-            className="w-full text-sm leading-relaxed bg-background border border-border rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-primary/40 resize-none min-h-[100px]"
-            rows={4}
-          />
-        ) : (
-          <p className="text-sm leading-relaxed">{lessonData.banglaExplanation}</p>
-        )}
-      </SectionCard>
+      <NotebookSheet>
+        <SectionCard
+          hint={<LessonSectionLabel emoji="🇧🇩" title={t("Bangla Explanation", "বাংলা ব্যাখ্যা")} variant="emerald" />}
+        >
+          {editMode ? (
+            <DiaryContentEditor
+              value={editedContent.banglaExplanation}
+              onChange={(value) => setEditedContent({ ...editedContent, banglaExplanation: value })}
+              placeholder={t("Enter Bangla explanation...", "বাংলা ব্যাখ্যা লিখুন...")}
+              rows={4}
+            />
+          ) : (
+            <DiaryContentRenderer
+              content={lessonData.banglaExplanation}
+              blockClassName="text-sm leading-relaxed text-slate-800 dark:text-slate-100"
+            />
+          )}
+        </SectionCard>
+      </NotebookSheet>
 
-      <SectionCard title={t("Easy English", "সহজ ইংরেজি")}>
-        {editMode ? (
-          <textarea
-            value={editedContent.easyEnglish}
-            onChange={(e) => setEditedContent({ ...editedContent, easyEnglish: e.target.value })}
-            className="w-full text-sm leading-relaxed bg-background border border-border rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-primary/40 resize-none min-h-[80px]"
-            rows={3}
-          />
-        ) : (
-          <p className="text-sm leading-relaxed">{lessonData.easyEnglish}</p>
-        )}
-      </SectionCard>
+      <NotebookSheet>
+        <SectionCard
+          hint={<LessonSectionLabel emoji="💡" title={t("Easy English", "সহজ ইংরেজি")} variant="amber" />}
+        >
+          {editMode ? (
+            <DiaryContentEditor
+              value={editedContent.easyEnglish}
+              onChange={(value) => setEditedContent({ ...editedContent, easyEnglish: value })}
+              placeholder={t("Enter easy English version...", "সহজ ইংরেজি লিখুন...")}
+              rows={3}
+            />
+          ) : (
+            <DiaryContentRenderer
+              content={lessonData.easyEnglish}
+              blockClassName="text-sm leading-relaxed text-slate-800 dark:text-slate-100"
+            />
+          )}
+        </SectionCard>
+      </NotebookSheet>
 
-      <SectionCard title={t("Pronunciation", "উচ্চারণ")}>
+      <NotebookSheet>
+        <SectionCard
+          hint={<LessonSectionLabel emoji="🗣️" title={t("Pronunciation", "উচ্চারণ")} variant="purple" />}
+        >
         {editMode ? (
           <div className="space-y-2">
             {editedContent.pronunciation.map((p, index) => (
@@ -214,10 +255,14 @@ function LessonPage() {
             ))}
           </ul>
         )}
-      </SectionCard>
+        </SectionCard>
+      </NotebookSheet>
 
       {(lessonData.vocabulary && lessonData.vocabulary.length > 0) || editMode ? (
-        <SectionCard title={t("Vocabulary", "শব্দার্থ")}>
+        <NotebookSheet>
+          <SectionCard
+            hint={<LessonSectionLabel emoji="📝" title={t("Vocabulary", "শব্দার্থ")} variant="indigo" />}
+          >
           {editMode ? (
             <div className="space-y-1.5 text-sm">
               {editedContent.vocabulary?.map((v, index) => (
@@ -280,17 +325,25 @@ function LessonPage() {
               ))}
             </ul>
           )}
-        </SectionCard>
+          </SectionCard>
+        </NotebookSheet>
       ) : null}
 
-      <SectionCard title={t("Video / Animation", "ভিডিও / অ্যানিমেশন")}>
+      <NotebookSheet>
+        <SectionCard
+          hint={<LessonSectionLabel emoji="🎬" title={t("Video / Animation", "ভিডিও / অ্যানিমেশন")} variant="sky" />}
+        >
         <button className="tap flex aspect-video w-full items-center justify-center rounded-2xl gradient-hero text-primary-foreground">
           <Play className="size-8" />
         </button>
-      </SectionCard>
+        </SectionCard>
+      </NotebookSheet>
 
       {(lessonData.importantNotes && lessonData.importantNotes.length > 0) || editMode ? (
-        <SectionCard title={t("Important Notes", "গুরুত্বপূর্ণ নোট")}>
+        <NotebookSheet>
+          <SectionCard
+            hint={<LessonSectionLabel emoji="📌" title={t("Important Notes", "গুরুত্বপূর্ণ নোট")} variant="indigo" />}
+          >
           {editMode ? (
             <div className="space-y-1 text-sm">
               {editedContent.importantNotes?.map((note, index) => (
@@ -340,10 +393,14 @@ function LessonPage() {
               ))}
             </ul>
           )}
-        </SectionCard>
+          </SectionCard>
+        </NotebookSheet>
       ) : null}
 
-      <SectionCard title={t("Common Mistakes", "সাধারণ ভুল")}>
+      <NotebookSheet>
+        <SectionCard
+          hint={<LessonSectionLabel emoji="⚠️" title={t("Common Mistakes", "সাধারণ ভুল")} variant="primary" />}
+        >
         <ul className="space-y-2 text-sm">
           <li className="rounded-2xl bg-destructive/10 px-3 py-2">
             ❌ He go to school → ✅ He <strong>goes</strong> to school
@@ -352,25 +409,35 @@ function LessonPage() {
             ❌ She don't like → ✅ She <strong>doesn't</strong> like
           </li>
         </ul>
-      </SectionCard>
+        </SectionCard>
+      </NotebookSheet>
 
-      <SectionCard title={t("Teacher Notes", "শিক্ষকের নোট")}>
+      <NotebookSheet>
+        <SectionCard
+          hint={<LessonSectionLabel emoji="👩‍🏫" title={t("Teacher Notes", "শিক্ষকের নোট")} variant="primary" />}
+        >
         <p className="text-sm leading-relaxed text-muted-foreground">
           {t(
             "Ms. Nabila: practise 10 sentences aloud before the class test.",
             "মিস নাবিলা: ক্লাস টেস্টের আগে ১০টি বাক্য মুখে বলে অনুশীলন করবে।",
           )}
         </p>
-      </SectionCard>
+        </SectionCard>
+      </NotebookSheet>
 
-      <SectionCard title={t("Parent Tips", "অভিভাবকের টিপস")} className="border-accent/40 bg-accent/10">
+      <NotebookSheet>
+        <SectionCard
+          hint={<LessonSectionLabel emoji="👨‍👩‍👧" title={t("Parent Tips", "অভিভাবকের টিপস")} variant="accent" />}
+          className="border-accent/40 bg-accent/10"
+        >
         <p className="text-sm leading-relaxed">
           {t(
             "Ask your child to describe their daily routine in 5 sentences. Correct only the -s ending.",
             "সন্তানকে ৫টি বাক্যে তার দৈনন্দিন রুটিন বলতে বলুন। শুধু -s যুক্ত হওয়ার ভুলটা ঠিক করে দিন।",
           )}
         </p>
-      </SectionCard>
+        </SectionCard>
+      </NotebookSheet>
 
       {/* Edit Mode Actions */}
       {editMode && (

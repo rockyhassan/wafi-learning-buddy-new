@@ -1,7 +1,9 @@
 import { createFileRoute, Link, notFound, useNavigate } from "@tanstack/react-router";
 import { ChevronRight, Pencil, Trash2, Plus, X, RotateCcw, Save, XCircle } from "lucide-react";
-import { PageShell, Pill, SectionCard } from "@/components/app-shell";
+import { PageShell, Pill } from "@/components/app-shell";
+import { NotebookSheet } from "@/components/NotebookSheet";
 import { useApp } from "@/lib/app-state";
+import { useAccess } from "@/lib/access-store";
 import { type Subject, type Chapter } from "@/lib/mock-data";
 import { getMasterSubjects, saveEditedSubject, getEditedSubject, resetSubjectToDefault } from "@/lib/subject-storage";
 import { useState, useEffect } from "react";
@@ -54,11 +56,15 @@ function getChapterLabel(chapter: Chapter): string {
 function SubjectPage() {
   const subject: Subject = Route.useLoaderData();
   const { t, lang } = useApp();
+  const { currentUser } = useAccess();
   const navigate = useNavigate();
   const search = Route.useSearch();
   const [isEditMode, setIsEditMode] = useState(false);
   const [localChapters, setLocalChapters] = useState(subject.chapters);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+
+  // Check if user has permission to edit study content
+  const canEditStudy = currentUser?.role === "admin" || currentUser?.role === "teacher";
 
   // Parse exam mode and chapter filter
   const isExamMode = search.exam === "1" && search.chapters;
@@ -78,6 +84,13 @@ function SubjectPage() {
       setLocalChapters(edited);
     }
   }, [subject.slug]);
+
+  // Force exit edit mode if user loses permission
+  useEffect(() => {
+    if (isEditMode && !canEditStudy) {
+      setIsEditMode(false);
+    }
+  }, [canEditStudy, isEditMode]);
 
   // Clear exam filter
   const clearExamFilter = () => {
@@ -225,14 +238,16 @@ function SubjectPage() {
       subtitle={`${subject.progress}% ${t("complete", "সম্পন্ন")}`}
       back="/study"
       action={
-        <button
-          type="button"
-          onClick={() => setIsEditMode(!isEditMode)}
-          className="tap inline-flex size-8 sm:size-9 items-center justify-center rounded-full border border-border bg-card text-foreground shadow-soft transition-colors hover:bg-accent/40"
-          aria-label={isEditMode ? "Exit edit mode" : "Enter edit mode"}
-        >
-          <Pencil className="size-3.5 sm:size-4" />
-        </button>
+        canEditStudy ? (
+          <button
+            type="button"
+            onClick={() => setIsEditMode(!isEditMode)}
+            className="tap inline-flex size-8 sm:size-9 items-center justify-center rounded-full border border-border bg-card text-foreground shadow-soft transition-colors hover:bg-accent/40"
+            aria-label={isEditMode ? "Exit edit mode" : "Enter edit mode"}
+          >
+            <Pencil className="size-3.5 sm:size-4" />
+          </button>
+        ) : null
       }
       hideNav={isEditMode}
     >
@@ -261,34 +276,35 @@ function SubjectPage() {
       )}
       <div className="space-y-4 pb-28">
         {displayedChapters.map((c) => (
-          <SectionCard
+          <NotebookSheet
             key={c.id}
             data-chapter-id={c.id}
-            title={
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-bold uppercase tracking-wide text-muted-foreground">
+          >
+            {/* Chapter Header */}
+            <div className="mb-4 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 flex-1 min-w-0">
+                <span className="text-sm font-bold uppercase tracking-wide text-muted-foreground shrink-0">
                   {getChapterLabel(c)}
                 </span>
-                {isEditMode && (
+                {isEditMode && canEditStudy && (
                   <button
                     type="button"
                     onClick={() => deleteChapter(c.id)}
-                    className="tap inline-flex size-6 items-center justify-center rounded-full bg-destructive/10 text-destructive hover:bg-destructive/20"
+                    className="tap inline-flex size-6 items-center justify-center rounded-full bg-destructive/10 text-destructive hover:bg-destructive/20 shrink-0"
                     aria-label="Delete chapter"
                   >
                     <Trash2 className="size-3" />
                   </button>
                 )}
               </div>
-            }
-            hint={
-              <Pill tone={c.done === c.lessons.length ? "success" : "warning"}>
+              <Pill tone={c.done === c.lessons.length ? "success" : "warning"} className="shrink-0">
                 {c.done}/{c.lessons.length}
               </Pill>
-            }
-          >
+            </div>
+
+            {/* Chapter Title & Edit Mode */}
             {isEditMode ? (
-              <div className="mb-3 space-y-2">
+              <div className="mb-4 space-y-2">
                 <div className="flex gap-2">
                   <select
                     value={c.labelType || "chapter"}
@@ -335,11 +351,16 @@ function SubjectPage() {
             ) : (
               <p className="mb-3 text-sm font-bold">{lang === "bn" ? c.bn : c.en}</p>
             )}
-            <ul className="space-y-2">
+
+            {/* Lessons with Ruled Dividers */}
+            <ul className="space-y-0">
               {c.lessons.map((lesson, i) => (
-                <li key={`${c.id}-${i}`}>
+                <li
+                  key={`${c.id}-${i}`}
+                  className="border-b border-sky-100 dark:border-sky-900/40 last:border-b-0 min-h-[2.5rem] py-2 flex items-center justify-between"
+                >
                   {isEditMode ? (
-                    <div className="flex items-center gap-2 rounded-2xl bg-muted px-3 py-2.5">
+                    <div className="w-full flex items-center gap-2">
                       <span className="grid size-7 shrink-0 place-items-center rounded-full bg-card text-[11px] font-bold">
                         {i + 1}
                       </span>
@@ -353,7 +374,7 @@ function SubjectPage() {
                       <button
                         type="button"
                         onClick={() => deleteLesson(c.id, i)}
-                        className="tap inline-flex size-6 items-center justify-center rounded-full bg-destructive/10 text-destructive hover:bg-destructive/20"
+                        className="tap inline-flex size-6 items-center justify-center rounded-full bg-destructive/10 text-destructive hover:bg-destructive/20 shrink-0"
                         aria-label="Delete lesson"
                       >
                         <Trash2 className="size-3" />
@@ -363,20 +384,22 @@ function SubjectPage() {
                     <Link
                       to="/lesson/$lessonId"
                       params={{ lessonId: `${subject.slug}-${c.id}-${i + 1}` }}
-                      className="tap flex items-center gap-3 rounded-2xl bg-muted px-3 py-2.5"
+                      className="tap w-full flex items-center gap-3"
                     >
                       <span className="grid size-7 shrink-0 place-items-center rounded-full bg-card text-[11px] font-bold">
                         {i + 1}
                       </span>
                       <span className="flex-1 truncate text-sm font-medium">{lesson}</span>
                       {i < c.done ? <Pill tone="success">✓</Pill> : null}
-                      <ChevronRight className="size-4 text-muted-foreground" />
+                      <ChevronRight className="size-4 text-muted-foreground shrink-0" />
                     </Link>
                   )}
                 </li>
               ))}
             </ul>
-            {isEditMode && (
+
+            {/* Add Lesson Button */}
+            {isEditMode && canEditStudy && (
               <button
                 type="button"
                 onClick={() => addLesson(c.id)}
@@ -386,9 +409,9 @@ function SubjectPage() {
                 {t("Add Lesson", "পাঠ যোগ করুন")}
               </button>
             )}
-          </SectionCard>
+          </NotebookSheet>
         ))}
-        {isEditMode && (
+        {isEditMode && canEditStudy && (
           <button
             type="button"
             onClick={addChapter}

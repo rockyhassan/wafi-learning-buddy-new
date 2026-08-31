@@ -3,6 +3,7 @@ import { Pencil, Trash2, Plus, Save, X, RotateCcw } from "lucide-react";
 import { PageShell } from "@/components/app-shell";
 import { Progress } from "@/components/ui/progress";
 import { useApp } from "@/lib/app-state";
+import { useAccess } from "@/lib/access-store";
 import { subjects as defaultSubjects, type Subject } from "@/lib/mock-data";
 import { getMasterSubjects, saveMasterSubjects, resetMasterSubjects } from "@/lib/subject-storage";
 import { getSubjectMeta } from "@/lib/subjects";
@@ -22,15 +23,26 @@ export const Route = createFileRoute("/study/")({
 
 function Study() {
   const { t, lang } = useApp();
+  const { currentUser } = useAccess();
   const [isEditMode, setIsEditMode] = useState(false);
   const [subjectList, setSubjectList] = useState<Subject[]>(defaultSubjects);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+
+  // Check if user has permission to edit study content
+  const canEditStudy = currentUser?.role === "admin" || currentUser?.role === "teacher";
 
   // Load subjects from storage on mount
   useEffect(() => {
     const stored = getMasterSubjects();
     setSubjectList(stored);
   }, []);
+
+  // Force exit edit mode if user loses permission
+  useEffect(() => {
+    if (isEditMode && !canEditStudy) {
+      setIsEditMode(false);
+    }
+  }, [canEditStudy, isEditMode]);
 
   const handleEditSubject = (index: number, field: "en" | "bn", value: string) => {
     setSubjectList((prev) => {
@@ -101,14 +113,16 @@ function Study() {
       title={t("Study", "পড়াশোনা")}
       subtitle={t("All subjects", "সব বিষয়")}
       action={
-        <button
-          type="button"
-          onClick={() => setIsEditMode(!isEditMode)}
-          className="tap inline-flex size-8 sm:size-9 items-center justify-center rounded-full border border-border bg-card text-foreground shadow-soft transition-colors hover:bg-accent/40"
-          aria-label={isEditMode ? "Exit edit mode" : "Enter edit mode"}
-        >
-          <Pencil className="size-3.5 sm:size-4" />
-        </button>
+        canEditStudy ? (
+          <button
+            type="button"
+            onClick={() => setIsEditMode(!isEditMode)}
+            className="tap inline-flex size-8 sm:size-9 items-center justify-center rounded-full border border-border bg-card text-foreground shadow-soft transition-colors hover:bg-accent/40"
+            aria-label={isEditMode ? "Exit edit mode" : "Enter edit mode"}
+          >
+            <Pencil className="size-3.5 sm:size-4" />
+          </button>
+        ) : null
       }
       hideNav={isEditMode}
     >
