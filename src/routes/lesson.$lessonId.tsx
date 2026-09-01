@@ -94,15 +94,12 @@ function LessonPage() {
     <button
       type="button"
       onClick={() => setEditMode(!editMode)}
-      className={`tap inline-flex size-8 sm:size-9 items-center justify-center rounded-full border ${
-        editMode 
-          ? "bg-primary text-primary-foreground border-primary" 
-          : "border-border bg-card text-foreground"
-      } shadow-soft transition-colors hover:bg-accent/40`}
+      className="tap inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/15 hover:bg-white/25 text-white text-xs font-semibold backdrop-blur-sm border border-white/20 transition shadow-sm"
       aria-label={editMode ? "Exit edit mode" : "Enter edit mode"}
       title={editMode ? "Exit edit mode" : "Edit lesson"}
     >
-      {editMode ? <X className="size-3.5 sm:size-4" /> : <Pencil className="size-3.5 sm:size-4" />}
+      <Pencil className="w-3.5 h-3.5" />
+      <span>Edit</span>
     </button>
   ) : null;
 

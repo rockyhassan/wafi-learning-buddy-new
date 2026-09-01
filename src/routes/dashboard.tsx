@@ -1,6 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ChevronRight, Send, ChevronDown } from "lucide-react";
-import { useState } from "react";
+import { ChevronRight, Send } from "lucide-react";
 import { BottomNav, SectionCard } from "@/components/app-shell";
 import { DashboardHeader } from "@/components/dashboard-header";
 import { DiaryItemCard } from "@/components/diary-item-card";
@@ -13,7 +12,6 @@ import {
   formatDiaryDate,
   calculateDaysRemaining,
   formatDaysRemaining,
-  getDateCategory,
 } from "@/lib/school-content";
 import { getSubjectMeta, getSubjectSlugFromExam, parseChapterNumbers } from "@/lib/subjects";
 
@@ -57,7 +55,6 @@ function Dashboard() {
   const { t } = useApp();
   const { can } = useAccess();
   const { diary, exams } = useSchoolContent();
-  const [expandedOlderDates, setExpandedOlderDates] = useState<Set<string>>(new Set());
 
   const visibleLinks = quickLinks.filter((q) => {
     if (isSessionOnlyRoute(q.to)) return true;
@@ -88,26 +85,6 @@ function Dashboard() {
 
   const sortedDates = Object.keys(diaryByDate).sort((a, b) => b.localeCompare(a));
 
-  const toggleDateExpansion = (date: string) => {
-    setExpandedOlderDates((prev) => {
-      const next = new Set(prev);
-      if (next.has(date)) {
-        next.delete(date);
-      } else {
-        next.add(date);
-      }
-      return next;
-    });
-  };
-
-  const isDateExpanded = (date: string): boolean => {
-    const category = getDateCategory(date);
-    if (category === "today" || category === "yesterday") {
-      return true;
-    }
-    return expandedOlderDates.has(date);
-  };
-
   return (
     <div className="relative min-h-screen w-full bg-canvas pb-28">
       {/* Sticky Header with curved bottom edge */}
@@ -122,7 +99,7 @@ function Dashboard() {
               to="/homework"
               className="group inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-blue-50 to-indigo-50 border border-indigo-100/70 px-3.5 py-1 text-xs font-bold text-indigo-600 shadow-[0_2px_8px_-2px_rgba(79,70,229,0.12)] hover:border-indigo-200 hover:shadow-indigo-500/15 active:scale-95 transition-all"
             >
-              <span>{t("All", "সব")}</span>
+              <span>{t("History →", "ইতিহাস →")}</span>
               <ChevronRight className="size-3.5 transition-transform duration-200 group-hover:translate-x-0.5" />
             </Link>
           }
@@ -133,43 +110,22 @@ function Dashboard() {
             </p>
           ) : (
             <div className="space-y-4">
-              {sortedDates.map((date) => {
-                const category = getDateCategory(date);
-                const isExpanded = isDateExpanded(date);
-
-                return (
-                  <div key={date}>
-                    <div className="flex items-center justify-between gap-2 mb-2">
-                      <p className="text-xs font-bold text-muted-foreground">
-                        {formatDiaryDate(date)}
-                      </p>
-                      {category === "older" && (
-                        <button
-                          onClick={() => toggleDateExpansion(date)}
-                          className="ml-auto inline-flex items-center gap-1.5 rounded-full bg-slate-50 hover:bg-indigo-50/70 border border-slate-200/80 hover:border-indigo-200 px-3 py-1 text-xs font-semibold text-slate-600 hover:text-indigo-600 active:scale-95 shadow-[0_1px_3px_rgba(0,0,0,0.04)] transition-all"
-                          aria-expanded={isExpanded}
-                        >
-                          <span>{isExpanded ? t("Hide", "লুকান") : t("Show", "দেখান")}</span>
-                          <ChevronDown
-                            className={`size-3.5 transition-transform duration-200 ${
-                              isExpanded ? "rotate-180 text-indigo-600" : "text-slate-400"
-                            }`}
-                          />
-                        </button>
-                      )}
-                    </div>
-                    {isExpanded && (
-                      <ul className="space-y-3 animate-in fade-in duration-200">
-                        {diaryByDate[date].map((d) => (
-                          <li key={d.id}>
-                            <DiaryItemCard entry={d} />
-                          </li>
-                        ))}
-                      </ul>
-                    )}
+              {sortedDates.length > 0 && (
+                <div>
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <p className="text-xs font-bold text-muted-foreground">
+                      {formatDiaryDate(sortedDates[0])}
+                    </p>
                   </div>
-                );
-              })}
+                  <ul className="space-y-3 animate-in fade-in duration-200">
+                    {diaryByDate[sortedDates[0]].map((d) => (
+                      <li key={d.id}>
+                        <DiaryItemCard entry={d} />
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
           )}
         </SectionCard>

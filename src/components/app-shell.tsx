@@ -19,7 +19,7 @@ export function SettingsButton() {
   return (
     <Link
       to="/settings"
-      className="tap inline-flex size-8 sm:size-9 items-center justify-center rounded-full border border-border bg-card text-foreground shadow-soft transition-colors hover:bg-accent/40"
+      className="tap inline-flex size-8 sm:size-9 items-center justify-center rounded-full bg-white/20 hover:bg-white/30 text-white text-xs font-semibold backdrop-blur-sm border border-white/20 transition shadow-sm"
       aria-label="Settings"
     >
       <Settings className="size-3.5 sm:size-4" />
@@ -33,7 +33,7 @@ export function LangToggle() {
     <button
       type="button"
       onClick={toggleLang}
-      className="tap inline-flex items-center gap-1 sm:gap-1.5 rounded-full border border-border bg-card px-2.5 py-1 sm:px-3 sm:py-1.5 text-[11px] sm:text-xs font-semibold text-foreground shadow-soft"
+      className="tap inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/20 hover:bg-white/30 text-white text-xs font-semibold backdrop-blur-sm border border-white/20 transition shadow-sm"
       aria-label="Toggle language"
     >
       <Languages className="size-3 sm:size-3.5" />

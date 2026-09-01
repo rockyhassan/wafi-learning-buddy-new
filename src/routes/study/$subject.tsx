@@ -242,10 +242,11 @@ function SubjectPage() {
           <button
             type="button"
             onClick={() => setIsEditMode(!isEditMode)}
-            className="tap inline-flex size-8 sm:size-9 items-center justify-center rounded-full border border-border bg-card text-foreground shadow-soft transition-colors hover:bg-accent/40"
+            className="tap inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/15 hover:bg-white/25 text-white text-xs font-semibold backdrop-blur-sm border border-white/20 transition shadow-sm"
             aria-label={isEditMode ? "Exit edit mode" : "Enter edit mode"}
           >
-            <Pencil className="size-3.5 sm:size-4" />
+            <Pencil className="w-3.5 h-3.5" />
+            <span>Edit</span>
           </button>
         ) : null
       }
