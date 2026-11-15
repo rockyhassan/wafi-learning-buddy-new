@@ -6,6 +6,7 @@ import {
   useRouter,
   HeadContent,
   Scripts,
+  useRouterState,
 } from "@tanstack/react-router";
 import { useEffect, type ReactNode } from "react";
 
@@ -125,11 +126,24 @@ function RootShell({ children }: { children: ReactNode }) {
       <head>
         <HeadContent />
       </head>
-      <body className="mx-auto" style={{ maxWidth: '800px' }}>
-        {children}
+      <body className="mx-auto">
+        <BodyWrapper>{children}</BodyWrapper>
         <Scripts />
       </body>
     </html>
+  );
+}
+
+function BodyWrapper({ children }: { children: ReactNode }) {
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  
+  // Full-width routes that should bypass the max-width constraint
+  const isFullWidthRoute = pathname === "/homework/worksheet-builder" || pathname === "/scan";
+  
+  return (
+    <div style={{ maxWidth: isFullWidthRoute ? 'none' : '800px' }} className="mx-auto">
+      {children}
+    </div>
   );
 }
 

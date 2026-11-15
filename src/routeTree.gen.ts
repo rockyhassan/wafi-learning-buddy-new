@@ -39,6 +39,7 @@ import { Route as AdminDiaryRouteImport } from './routes/admin/diary'
 import { Route as AdminExamsRouteImport } from './routes/admin/exams'
 import { Route as AdminRoutineRouteImport } from './routes/admin/routine'
 import { Route as HomeworkIndexRouteImport } from './routes/homework/index'
+import { Route as HomeworkWorksheetBuilderRouteImport } from './routes/homework/worksheet-builder'
 import { Route as LessonLessonIdRouteImport } from './routes/lesson.$lessonId'
 import { Route as StudyIndexRouteImport } from './routes/study/index'
 import { Route as StudySubjectRouteImport } from './routes/study/$subject'
@@ -194,6 +195,12 @@ const HomeworkIndexRoute = HomeworkIndexRouteImport.update({
   path: '/homework/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const HomeworkWorksheetBuilderRoute =
+  HomeworkWorksheetBuilderRouteImport.update({
+    id: '/homework/worksheet-builder',
+    path: '/homework/worksheet-builder',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const LessonLessonIdRoute = LessonLessonIdRouteImport.update({
   id: '/lesson/$lessonId',
   path: '/lesson/$lessonId',
@@ -244,6 +251,7 @@ export interface FileRoutesByFullPath {
   '/admin/diary': typeof AdminDiaryRoute
   '/admin/exams': typeof AdminExamsRoute
   '/admin/routine': typeof AdminRoutineRoute
+  '/homework/worksheet-builder': typeof HomeworkWorksheetBuilderRoute
   '/lesson/$lessonId': typeof LessonLessonIdRoute
   '/study/$subject': typeof StudySubjectRoute
   '/admin/': typeof AdminIndexRoute
@@ -280,6 +288,7 @@ export interface FileRoutesByTo {
   '/admin/diary': typeof AdminDiaryRoute
   '/admin/exams': typeof AdminExamsRoute
   '/admin/routine': typeof AdminRoutineRoute
+  '/homework/worksheet-builder': typeof HomeworkWorksheetBuilderRoute
   '/lesson/$lessonId': typeof LessonLessonIdRoute
   '/study/$subject': typeof StudySubjectRoute
   '/admin': typeof AdminIndexRoute
@@ -317,6 +326,7 @@ export interface FileRoutesById {
   '/admin/diary': typeof AdminDiaryRoute
   '/admin/exams': typeof AdminExamsRoute
   '/admin/routine': typeof AdminRoutineRoute
+  '/homework/worksheet-builder': typeof HomeworkWorksheetBuilderRoute
   '/lesson/$lessonId': typeof LessonLessonIdRoute
   '/study/$subject': typeof StudySubjectRoute
   '/admin/': typeof AdminIndexRoute
@@ -355,6 +365,7 @@ export interface FileRouteTypes {
     | '/admin/diary'
     | '/admin/exams'
     | '/admin/routine'
+    | '/homework/worksheet-builder'
     | '/lesson/$lessonId'
     | '/study/$subject'
     | '/admin/'
@@ -391,6 +402,7 @@ export interface FileRouteTypes {
     | '/admin/diary'
     | '/admin/exams'
     | '/admin/routine'
+    | '/homework/worksheet-builder'
     | '/lesson/$lessonId'
     | '/study/$subject'
     | '/admin'
@@ -427,6 +439,7 @@ export interface FileRouteTypes {
     | '/admin/diary'
     | '/admin/exams'
     | '/admin/routine'
+    | '/homework/worksheet-builder'
     | '/lesson/$lessonId'
     | '/study/$subject'
     | '/admin/'
@@ -464,6 +477,7 @@ export interface RootRouteChildren {
   AdminDiaryRoute: typeof AdminDiaryRoute
   AdminExamsRoute: typeof AdminExamsRoute
   AdminRoutineRoute: typeof AdminRoutineRoute
+  HomeworkWorksheetBuilderRoute: typeof HomeworkWorksheetBuilderRoute
   LessonLessonIdRoute: typeof LessonLessonIdRoute
   StudySubjectRoute: typeof StudySubjectRoute
   AdminIndexRoute: typeof AdminIndexRoute
@@ -684,6 +698,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof HomeworkIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/homework/worksheet-builder': {
+      id: '/homework/worksheet-builder'
+      path: '/homework/worksheet-builder'
+      fullPath: '/homework/worksheet-builder'
+      preLoaderRoute: typeof HomeworkWorksheetBuilderRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/lesson/$lessonId': {
       id: '/lesson/$lessonId'
       path: '/lesson/$lessonId'
@@ -744,6 +765,7 @@ const rootRouteChildren: RootRouteChildren = {
   AdminDiaryRoute: AdminDiaryRoute,
   AdminExamsRoute: AdminExamsRoute,
   AdminRoutineRoute: AdminRoutineRoute,
+  HomeworkWorksheetBuilderRoute: HomeworkWorksheetBuilderRoute,
   LessonLessonIdRoute: LessonLessonIdRoute,
   StudySubjectRoute: StudySubjectRoute,
   AdminIndexRoute: AdminIndexRoute,

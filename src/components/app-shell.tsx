@@ -3,11 +3,11 @@ import {
   ArrowLeft,
   BookOpen,
   Calendar,
+  FileText,
   Home,
   Languages,
   Moon,
   NotebookPen,
-  ScanLine,
   Settings,
   Sun,
 } from "lucide-react";
@@ -60,7 +60,7 @@ export function ThemeToggle() {
 const nav = [
   { to: "/dashboard", icon: Home, en: "Home", bn: "হোম" },
   { to: "/study", icon: BookOpen, en: "Study", bn: "পড়া" },
-  { to: "/scan", icon: ScanLine, en: "Scan", bn: "স্ক্যান" },
+  { to: "/homework/worksheet-builder", icon: FileText, en: "Worksheet", bn: "ওয়ার্কশিট" },
   { to: "/homework", icon: NotebookPen, en: "Homework", bn: "হোমওয়ার্ক" },
   { to: "/planner", icon: Calendar, en: "Routine", bn: "রুটিন" },
 ] as const;
@@ -68,6 +68,11 @@ const nav = [
 export function BottomNav() {
   const { t } = useApp();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+
+  // Hide bottom nav on worksheet builder routes
+  if (pathname === "/scan" || pathname === "/homework/worksheet-builder") {
+    return null;
+  }
 
   return (
     <nav className="fixed bottom-0 left-1/2 z-40 w-full max-w-[800px] -translate-x-1/2 border-t border-border bg-card/95 px-2 pb-[env(safe-area-inset-bottom)] backdrop-blur">
@@ -117,6 +122,16 @@ export function PageShell({
   children: ReactNode;
   hideNav?: boolean;
 }) {
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  
+  // Check if we should apply full-width layout
+  const isFullWidth = pathname === "/homework/worksheet-builder" || pathname === "/scan";
+  
+  if (isFullWidth) {
+    // Full-width layout for worksheet builder and scan routes
+    return <>{children}</>;
+  }
+  
   return (
     <div className="relative min-h-screen w-full bg-canvas pb-28">
       <header className="sticky top-0 z-40 w-full gradient-hero text-primary-foreground">
