@@ -26,7 +26,9 @@ import {
   Sparkles,
   Cloud,
   CloudOff,
-  Lock
+  Lock,
+  ArrowLeft,
+  CheckSquare
 } from 'lucide-react';
 
 // --- Section Types for Textbook Exercises ---
@@ -37,7 +39,9 @@ const SECTION_TYPES = [
   { id: 'matching', label: 'Match Column A & B', icon: Table2 },
   { id: 'mcq', label: 'Multiple Choice (MCQ)', icon: ListChecks },
   { id: 'word_meaning', label: 'Word Meanings / Sentences', icon: Type },
-  { id: 'math_box', label: 'Math / Work Space', icon: FileText }
+  { id: 'math_box', label: 'Math / Work Space', icon: FileText },
+  { id: 'passage_cloze', label: 'Passage / Cloze', icon: BookMarked },
+  { id: 'tick_sentence', label: 'Tick Correct Sentence', icon: CheckSquare }
 ];
 
 // --- Starter Textbook Chapter (Works 100% Offline) ---
@@ -154,27 +158,39 @@ const STORAGE_KEY_BANK = 'wafi_hybrid_book_bank_v2';
 const STORAGE_KEY_ACTIVE = 'wafi_hybrid_active_sheet_v2';
 
 // --- Estimate vertical height (in mm) per block so content flows across A4 pages ---
-const A4_CONTENT_BUDGET_MM = 272; // Full usable A4 printable height (297mm - 24mm padding)
-const PAGE_1_HEADER_MM = 35;
+const A4_CONTENT_BUDGET_MM = 274;
+const PAGE_1_HEADER_MM = 38;
 
 function estimateItemHeightMm(sectionType, item) {
-  const promptLen = (item.prompt || '').length;
+  const promptLen = (item.prompt || item.passage || '').length;
   const wrappedTextLines = Math.max(1, Math.ceil(promptLen / 76));
 
   switch (sectionType) {
     case 'fill_blanks':
-      return wrappedTextLines * 10.5 + 4.5;
+      return wrappedTextLines * 7.5 + 3.5;
     case 'true_false':
-      return wrappedTextLines * 5.5 + 5.5;
+      return wrappedTextLines * 5.2 + 4.5;
     case 'short_qa':
-      return wrappedTextLines * 5.4 + (Number(item.lines) || 3) * 11 + 4;
+      return wrappedTextLines * 5.2 + (Number(item.lines) || 3) * 9.5 + 3.5;
     case 'mcq':
       return wrappedTextLines * 5.4 + 12;
     case 'math_box':
       return wrappedTextLines * 5.4 + (Number(item.boxHeight) || 26) + 4;
+    case 'passage_cloze':
+      // Passage with generous line height (2.65): 6.8mm per line + padding
+      return wrappedTextLines * 6.8 + 6;
     case 'matching':
+      // Header (~7mm) + separator (~4.5mm) + per item (8.5mm including borders)
+      return 7.6 + (item && item.left ? 8.5 : 0);
     case 'word_meaning':
       return 7.6;
+    case 'tick_sentence':
+      // Two sentences per item (~20 chars each avg), ~4.5mm each + spacing
+      const sentenceALen = (item.sentenceA || '').length;
+      const sentenceBLen = (item.sentenceB || '').length;
+      const wrappedA = Math.ceil(sentenceALen / 76);
+      const wrappedB = Math.ceil(sentenceBLen / 76);
+      return (Math.max(1, wrappedA) + Math.max(1, wrappedB)) * 5.2 + 3.8;
     default:
       return wrappedTextLines * 5.5 + 5;
   }
@@ -231,6 +247,16 @@ function paginateWorksheet(worksheet) {
       continue;
     }
 
+    if (section.type === 'matching') {
+      const totalMatchingMm =
+        sectionHeaderMm +
+        section.items.reduce((sum, it) => sum + estimateItemHeightMm('matching', it), 0) +
+        4;
+      if (remainingMm < totalMatchingMm && currentPage.sections.length > 0) {
+        pushNewPage();
+      }
+    }
+
     let itemIdx = 0;
     let isContinuation = false;
 
@@ -284,6 +310,7 @@ function paginateWorksheet(worksheet) {
  * - isAdmin: boolean - whether user is an admin (default: true for backward compatibility)
  * - isOnline: boolean - whether Firestore is available
  * - worksheets: array - shared worksheets from Firestore
+ * - onBack: function - callback to navigate back
  * - onSaveToFirestore: async function to save worksheet to Firestore
  * - onDeleteFromFirestore: async function to delete worksheet from Firestore
  * - onSaveActiveLocally: function to save active worksheet to localStorage
@@ -291,7 +318,9 @@ function paginateWorksheet(worksheet) {
 export function WafiWorksheetBuilder({
   isAdmin = true,
   isOnline = true,
+  isLoading = false,
   worksheets: firestoreWorksheets = [],
+  onBack = null,
   onSaveToFirestore = null,
   onDeleteFromFirestore = null,
   onSaveActiveLocally = null,
@@ -524,7 +553,7 @@ export function WafiWorksheetBuilder({
 
     const styleEl = doc.createElement('style');
     styleEl.textContent = `
-      @page { size: A4 portrait; margin: 0; }
+      @page { size: A4 portrait; margin: 6mm; }
       * { box-sizing: border-box; }
       body {
         margin: 0;
@@ -535,16 +564,21 @@ export function WafiWorksheetBuilder({
         -webkit-print-color-adjust: exact;
         print-color-adjust: exact;
       }
+      h1, h2, h3, h4, h5, h6, p {
+        margin: 0;
+        padding: 0;
+      }
       .a4-sheet {
-        width: 210mm;
-        height: 297mm;
-        padding: 12mm 13mm 12mm 22mm;
+        width: 198mm;
+        height: 284mm;
+        min-height: 284mm;
+        position: relative;
+        padding: 5mm 4mm 3mm 12mm;
         margin: 0 auto;
         background: #ffffff;
         display: flex;
         flex-direction: column;
         justify-content: space-between;
-        overflow: hidden;
         page-break-after: always;
         break-after: page;
       }
@@ -582,9 +616,9 @@ export function WafiWorksheetBuilder({
         text-align: center;
         line-height: 1.25;
       }
-      h2 { margin: 0; font-size: 18px; font-weight: 700; }
-      h3 { margin: 0; font-size: 15px; font-weight: 700; }
-      p { margin: 3px 0 0 0; }
+      h2 { font-size: 18px; font-weight: 700; }
+      h3 { font-size: 15px; font-weight: 700; }
+      h4 { font-size: 14px; font-weight: 700; }
       .grid-cols-3 {
         display: grid;
         grid-template-columns: repeat(3, 1fr);
@@ -606,12 +640,24 @@ export function WafiWorksheetBuilder({
       }
       section { margin-bottom: 18px; }
       section > .border-b {
+        border-bottom: none !important;
+        margin-bottom: 8px;
+        padding-bottom: 0;
+      }
+      section > .border-b h4 {
+        margin: 0;
+        padding: 0;
+        padding-bottom: 3px;
         border-bottom: 1px solid #94a3b8;
-        padding-bottom: 4px;
-        margin-bottom: 10px;
+        line-height: 1.2;
       }
       ol { list-style: none; margin: 0; padding: 0 0 0 4px; }
-      li { margin-bottom: 10px; font-size: 14.5px; }
+      li {
+        margin-bottom: 7px;
+        font-size: 14.5px;
+        break-inside: avoid;
+        page-break-inside: avoid;
+      }
       li > div:first-child, li.flex {
         display: flex;
         align-items: baseline;
@@ -624,14 +670,14 @@ export function WafiWorksheetBuilder({
       .pl-7 { padding-left: 30px; }
       .fill-blanks-item,
       li.fill-blanks-item {
-        line-height: 2.6 !important;
-        margin-bottom: 16px !important;
+        line-height: 1.95;
+        margin-bottom: 12px !important;
       }
       .fill-blanks-item span {
-        line-height: 2.6 !important;
+        line-height: 1.95;
       }
       .leading-\[2\.6\] {
-        line-height: 2.6 !important;
+        line-height: 1.95 !important;
       }
       .mb-4 {
         margin-bottom: 16px !important;
@@ -650,7 +696,7 @@ export function WafiWorksheetBuilder({
         flex-shrink: 0;
       }
       .h-\\[11mm\\] {
-        height: 11mm;
+        height: 9.5mm;
         border-bottom: 1px solid #64748b;
         width: 100%;
       }
@@ -673,6 +719,16 @@ export function WafiWorksheetBuilder({
         font-size: 13.5px;
       }
       .grid-cols-2 > div { display: flex; align-items: center; gap: 8px; }
+      
+      /* === MATCHING SECTION CSS (Inline styles used instead) === */
+      .matching-col-header { border-bottom: 1.5px solid #1e293b !important; }
+      
+      .border-r-0 { border-right: 0 !important; }
+      .border-l-0 { border-left: 0 !important; }
+      .border-t-0 { border-top: 0 !important; }
+      .rounded-l-none { border-radius: 0 !important; }
+      .rounded-r-none { border-radius: 0 !important; }
+      
       .rounded-full {
         display: inline-block;
         width: 13px;
@@ -695,6 +751,92 @@ export function WafiWorksheetBuilder({
         text-transform: uppercase;
         color: #94a3b8;
       }
+      
+      /* === FLEX UTILITIES === */
+      .flex {
+        display: flex;
+      }
+      .flex-col {
+        flex-direction: column;
+      }
+      .flex-1 {
+        flex: 1;
+      }
+      .items-baseline {
+        align-items: baseline;
+      }
+      .items-center {
+        align-items: center;
+      }
+      .gap-1\.5 {
+        gap: 6px;
+      }
+      .gap-2 {
+        gap: 8px;
+      }
+      .gap-3 {
+        gap: 12px;
+      }
+      .pt-0\.5 {
+        padding-top: 2px;
+      }
+      
+      /* === TEXT UTILITIES === */
+      .text-sm { font-size: 14px; line-height: 1.4286; }
+      .text-xs { font-size: 12px; line-height: 1.3333; }
+      .text-justify { text-align: justify; }
+      .text-slate-600 { color: #475569; }
+      .text-slate-800 { color: #1e293b; }
+      
+      /* === LAYOUT & SPACING === */
+      .mb-1 { margin-bottom: 4px; }
+      .mb-1\.5 { margin-bottom: 6px; }
+      .mb-2 { margin-bottom: 8px; }
+      .mb-4 { margin-bottom: 16px; }
+      .p-2 { padding: 8px; }
+      .px-1 { padding-left: 4px; padding-right: 4px; }
+      .mx-0\.5 { margin-left: 2px; margin-right: 2px; }
+      .mx-1 { margin-left: 4px; margin-right: 4px; }
+      
+      /* === BORDER & ROUNDED === */
+      .rounded { border-radius: 4px; }
+      .border { border: 1px solid #d1d5db; }
+      .border-slate-300 { border-color: #cbd5e1; }
+      .border-slate-400 { border-color: #94a3b8; }
+      .border-2.border-slate-900.rounded { 
+        display: inline-block;
+        width: 16px;
+        height: 16px;
+        border-radius: 4px;
+        border: 2px solid #0f172a;
+      }
+      
+      /* === LEAD/LINE HEIGHT === */
+      .leading-\[2\.3\] { line-height: 2.3; }
+      .leading-\[2\.65\] { line-height: 2.65; }
+      
+
+      /* === INLINE STYLES === */
+      span[style*="width"] {
+        display: inline-block;
+      }
+      
+      /* === ALIGN BASELINE === */
+      .align-baseline { vertical-align: baseline; }
+      
+      /* === TICK SENTENCE CHECKBOX STYLING === */
+      .inline-block.h-3\\.5.w-3\\.5.rounded-full.border.border-slate-900.shrink-0 {
+        width: 13px;
+        height: 13px;
+        border: 1px solid #0f172a;
+      }
+      
+      /* Space-y utility */
+      .space-y-1 > * + * { margin-top: 4px; }
+      .space-y-2 > * + * { margin-top: 8px; }
+      .space-y-3 > * + * { margin-top: 12px; }
+      .space-y-4 > * + * { margin-top: 16px; }
+
       .text-right {
         text-align: right;
         font-size: 11px;
@@ -702,8 +844,8 @@ export function WafiWorksheetBuilder({
         padding-top: 8px;
       }
       .answer-key-page {
-        width: 210mm;
-        padding: 12mm 13mm 12mm 22mm;
+        width: 198mm;
+        padding: 5mm 4mm 3mm 12mm;
         margin: 0 auto;
         page-break-before: always;
         break-before: page;
@@ -893,10 +1035,10 @@ export function WafiWorksheetBuilder({
           ctx.beginPath();
           ctx.strokeStyle = '#94a3b8';
           ctx.lineWidth = 0.25;
-          ctx.moveTo(MARGIN_LEFT, y + 1.6);
-          ctx.lineTo(MARGIN_LEFT + CONTENT_W, y + 1.6);
+          ctx.moveTo(MARGIN_LEFT, y + 1.2);
+          ctx.lineTo(MARGIN_LEFT + CONTENT_W, y + 1.2);
           ctx.stroke();
-          y += 7.2;
+          y += 5.2;
 
           // 1. FILL IN THE BLANKS
           if (section.type === 'fill_blanks') {
@@ -982,33 +1124,83 @@ export function WafiWorksheetBuilder({
 
           // 3. MATCH COLUMN A & B
           if (section.type === 'matching') {
-            const halfW = CONTENT_W / 2;
-            if (!section.isContinuation) {
-              ctx.fillStyle = '#f1f5f9';
-              ctx.fillRect(MARGIN_LEFT, y - 4.2, CONTENT_W, 7);
-              ctx.strokeStyle = '#0f172a';
-              ctx.lineWidth = 0.3;
-              ctx.strokeRect(MARGIN_LEFT, y - 4.2, halfW, 7);
-              ctx.strokeRect(MARGIN_LEFT + halfW, y - 4.2, halfW, 7);
+            const boxW = (CONTENT_W - 9) / 2; // Two boxes with ~9mm center gap
+            const gapW = 9; // Center gap for drawing lines
+            const itemRowH = 8.5; // Row height per item
 
+            if (!section.isContinuation) {
+              // Header row with light slate background
+              const headerH = 7;
+              ctx.fillStyle = '#f1f5f9';
+              ctx.fillRect(MARGIN_LEFT, y - 4.2, boxW, headerH);
+              ctx.fillRect(MARGIN_LEFT + boxW + gapW, y - 4.2, boxW, headerH);
+
+              // Header borders - crisp 0.35mm
+              ctx.strokeStyle = '#334155';
+              ctx.lineWidth = 0.35;
+              ctx.strokeRect(MARGIN_LEFT, y - 4.2, boxW, headerH);
+              ctx.strokeRect(MARGIN_LEFT + boxW + gapW, y - 4.2, boxW, headerH);
+
+              // Header text - bold, centered
               ctx.fillStyle = '#020617';
               ctx.font = `700 3.9px ${fontStack}`;
-              ctx.fillText('Column A', MARGIN_LEFT + 3, y + 0.5);
-              ctx.fillText('Column B', MARGIN_LEFT + halfW + 3, y + 0.5);
+              ctx.textAlign = 'center';
+              ctx.fillText('Column A', MARGIN_LEFT + boxW / 2, y + 0.8);
+              ctx.fillText('Column B', MARGIN_LEFT + boxW + gapW + boxW / 2, y + 0.8);
+              ctx.textAlign = 'left';
+
+              // Header bottom border (divider between header and items)
+              ctx.beginPath();
+              ctx.strokeStyle = '#64748b';
+              ctx.lineWidth = 0.25;
+              ctx.moveTo(MARGIN_LEFT, y + 2.8);
+              ctx.lineTo(MARGIN_LEFT + boxW, y + 2.8);
+              ctx.stroke();
+              ctx.beginPath();
+              ctx.moveTo(MARGIN_LEFT + boxW + gapW, y + 2.8);
+              ctx.lineTo(MARGIN_LEFT + boxW + gapW + boxW, y + 2.8);
+              ctx.stroke();
+
               y += 7;
             }
 
-            section.items.forEach((item) => {
-              ctx.strokeStyle = '#0f172a';
-              ctx.lineWidth = 0.3;
-              ctx.strokeRect(MARGIN_LEFT, y - 4.2, halfW, 7.2);
-              ctx.strokeRect(MARGIN_LEFT + halfW, y - 4.2, halfW, 7.2);
-
+            // Item rows
+            section.items.forEach((item, itemIdx) => {
+              const itemY = y - 4.2;
+              
+              // Left box with border
+              ctx.strokeStyle = '#334155';
+              ctx.lineWidth = 0.35;
+              ctx.strokeRect(MARGIN_LEFT, itemY, boxW, itemRowH);
               ctx.fillStyle = '#020617';
               ctx.font = `400 3.9px ${fontStack}`;
-              ctx.fillText(item.left || '', MARGIN_LEFT + 3, y + 0.6);
-              ctx.fillText(item.right || '', MARGIN_LEFT + halfW + 3, y + 0.6);
-              y += 7.2;
+              ctx.textAlign = 'center';
+              ctx.fillText(item.left || '', MARGIN_LEFT + boxW / 2, y + 0.6);
+
+              // Right box with border
+              ctx.strokeStyle = '#334155';
+              ctx.lineWidth = 0.35;
+              ctx.strokeRect(MARGIN_LEFT + boxW + gapW, itemY, boxW, itemRowH);
+              ctx.fillStyle = '#020617';
+              ctx.font = `400 3.9px ${fontStack}`;
+              ctx.fillText(item.right || '', MARGIN_LEFT + boxW + gapW + boxW / 2, y + 0.6);
+              ctx.textAlign = 'left';
+
+              // Horizontal divider between items (if not the last item)
+              if (itemIdx < section.items.length - 1) {
+                ctx.beginPath();
+                ctx.strokeStyle = '#64748b';
+                ctx.lineWidth = 0.25;
+                ctx.moveTo(MARGIN_LEFT, itemY + itemRowH);
+                ctx.lineTo(MARGIN_LEFT + boxW, itemY + itemRowH);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(MARGIN_LEFT + boxW + gapW, itemY + itemRowH);
+                ctx.lineTo(MARGIN_LEFT + boxW + gapW + boxW, itemY + itemRowH);
+                ctx.stroke();
+              }
+
+              y += itemRowH;
             });
             y += 2;
           }
@@ -1143,6 +1335,195 @@ export function WafiWorksheetBuilder({
               ctx.fillText('WORK / ANSWER', MARGIN_LEFT + CONTENT_W - 2, y + 3.5);
               ctx.textAlign = 'left';
               y += boxH + 5.5;
+            });
+          }
+
+          // 8. PASSAGE / CLOZE
+          if (section.type === 'passage_cloze') {
+            section.items.forEach((item) => {
+              const passage = item.passage || '';
+              const hasBrackets = /\(\s*[^/]+\s*\/\s*[^)]+\s*\)/g.test(passage);
+              const hasBlanks = /_+/.test(passage);
+              
+              ctx.font = `400 3.8px ${fontStack}`;
+              ctx.fillStyle = '#020617';
+              ctx.textAlign = 'left';
+
+              if (hasBrackets) {
+                // Render with bracket choices
+                const bracketRegex = /(\(\s*[^/]+\s*\/\s*[^)]+\s*\))/g;
+                const parts = passage.split(bracketRegex);
+                let lineStart = MARGIN_LEFT;
+                let lineY = y;
+                const maxWidth = MARGIN_LEFT + CONTENT_W;
+
+                parts.forEach((part) => {
+                  if (!part) return;
+
+                  if (/^\(\s*[^/]+\s*\/\s*[^)]+\s*\)$/.test(part)) {
+                    // Bracket choice
+                    const brackW = ctx.measureText(part).width + 3;
+                    if (lineStart + brackW > maxWidth) {
+                      lineY += 5.8;
+                      lineStart = MARGIN_LEFT;
+                    }
+                    ctx.strokeStyle = '#0f172a';
+                    ctx.lineWidth = 0.3;
+                    ctx.strokeRect(lineStart, lineY - 3, brackW, 4.5);
+                    ctx.fillStyle = '#020617';
+                    ctx.font = `600 3.7px ${fontStack}`;
+                    ctx.fillText(part, lineStart + 1.5, lineY);
+                    lineStart += brackW + 1;
+                  } else {
+                    // Regular text
+                    const words = part.split(/(\s+)/);
+                    words.forEach((w) => {
+                      if (!w) return;
+                      const wW = ctx.measureText(w).width;
+                      if (lineStart + wW > maxWidth && w.trim()) {
+                        lineY += 5.8;
+                        lineStart = MARGIN_LEFT;
+                      }
+                      ctx.font = `400 3.8px ${fontStack}`;
+                      ctx.fillStyle = '#020617';
+                      ctx.fillText(w, lineStart, lineY);
+                      lineStart += wW;
+                    });
+                  }
+                });
+                y = lineY + 5.8;
+              } else if (hasBlanks) {
+                // Render with underline blanks
+                const blankRegex = /(_+)/g;
+                const parts = passage.split(blankRegex);
+                let lineStart = MARGIN_LEFT;
+                let lineY = y;
+
+                parts.forEach((part) => {
+                  if (!part) return;
+
+                  if (/^_+$/.test(part)) {
+                    // Blank line
+                    const blankW = Math.max(20, part.length * 3.5);
+                    if (lineStart + blankW > maxWidth) {
+                      lineY += 5.8;
+                      lineStart = MARGIN_LEFT;
+                    }
+                    ctx.strokeStyle = '#0f172a';
+                    ctx.lineWidth = 0.35;
+                    ctx.beginPath();
+                    ctx.moveTo(lineStart + 1, lineY + 0.5);
+                    ctx.lineTo(lineStart + blankW - 1, lineY + 0.5);
+                    ctx.stroke();
+                    lineStart += blankW + 1;
+                  } else {
+                    // Regular text
+                    const words = part.split(/(\s+)/);
+                    words.forEach((w) => {
+                      if (!w) return;
+                      const wW = ctx.measureText(w).width;
+                      if (lineStart + wW > maxWidth && w.trim()) {
+                        lineY += 5.8;
+                        lineStart = MARGIN_LEFT;
+                      }
+                      ctx.fillStyle = '#020617';
+                      ctx.font = `400 3.8px ${fontStack}`;
+                      ctx.fillText(w, lineStart, lineY);
+                      lineStart += wW;
+                    });
+                  }
+                });
+                y = lineY + 5.8;
+              } else {
+                // Plain text (just in case)
+                const passageLines = wrapTextLines(ctx, passage, CONTENT_W);
+                passageLines.forEach((line) => {
+                  ctx.fillText(line, MARGIN_LEFT, y);
+                  y += 5.8;
+                });
+              }
+              y += 3;
+            });
+          }
+
+          // 9. TICK SENTENCE
+          if (section.type === 'tick_sentence') {
+            const checkboxSize = 4.2; // mm (15px equivalent)
+            const itemNumberWidth = 6; // mm for item number
+            const itemNumberX = MARGIN_LEFT + 1;
+            const rightStackX = MARGIN_LEFT + itemNumberWidth + 4; // after item number + gap
+            const checkboxX = rightStackX;
+            const labelX = checkboxX + checkboxSize + 2; // after checkbox + small gap
+            const sentenceStartX = labelX + 3.5; // after label + gap
+            const maxSentenceWidth = MARGIN_LEFT + CONTENT_W - sentenceStartX;
+            const lineHeight = 5.2; // mm per text line
+            const verticalRowGap = 6; // mm gap between Row A and Row B
+            
+            section.items.forEach((item, idxItem) => {
+              const itemNumStr = `${section.startIndex + idxItem + 1}.`;
+              
+              // Calculate line counts for each sentence
+              const sentenceALines = wrapTextLines(ctx, item.sentenceA, maxSentenceWidth);
+              const sentenceBLines = wrapTextLines(ctx, item.sentenceB, maxSentenceWidth);
+              
+              // Calculate actual row heights
+              const rowAHeight = Math.max(1, sentenceALines.length) * lineHeight;
+              const rowBHeight = Math.max(1, sentenceBLines.length) * lineHeight;
+              const totalItemHeight = rowAHeight + verticalRowGap + rowBHeight;
+              
+              // === ROW A ===
+              const rowAY = y;
+              
+              // Checkbox A
+              ctx.strokeStyle = '#0f172a';
+              ctx.lineWidth = 0.35;
+              ctx.strokeRect(checkboxX, rowAY + (rowAHeight - checkboxSize) / 2, checkboxSize, checkboxSize);
+              
+              // Label A (bold)
+              ctx.fillStyle = '#020617';
+              ctx.font = `700 3.9px ${fontStack}`;
+              ctx.textAlign = 'left';
+              ctx.fillText('A', labelX, rowAY + rowAHeight / 2 + 1.2);
+              
+              // Sentence A (wrapped text, baseline centered)
+              ctx.font = `400 3.8px ${fontStack}`;
+              ctx.fillStyle = '#020617';
+              sentenceALines.forEach((line, lIdx) => {
+                const lineY = rowAY + rowAHeight / 2 - (sentenceALines.length - 1) * lineHeight / 2 + lIdx * lineHeight;
+                ctx.fillText(line, sentenceStartX, lineY + 1.1);
+              });
+              
+              // === ROW B ===
+              const rowBY = y + rowAHeight + verticalRowGap;
+              
+              // Checkbox B
+              ctx.strokeStyle = '#0f172a';
+              ctx.lineWidth = 0.35;
+              ctx.strokeRect(checkboxX, rowBY + (rowBHeight - checkboxSize) / 2, checkboxSize, checkboxSize);
+              
+              // Label B (bold)
+              ctx.fillStyle = '#020617';
+              ctx.font = `700 3.9px ${fontStack}`;
+              ctx.textAlign = 'left';
+              ctx.fillText('B', labelX, rowBY + rowBHeight / 2 + 1.2);
+              
+              // Sentence B (wrapped text, baseline centered)
+              ctx.font = `400 3.8px ${fontStack}`;
+              ctx.fillStyle = '#020617';
+              sentenceBLines.forEach((line, lIdx) => {
+                const lineY = rowBY + rowBHeight / 2 - (sentenceBLines.length - 1) * lineHeight / 2 + lIdx * lineHeight;
+                ctx.fillText(line, sentenceStartX, lineY + 1.1);
+              });
+              
+              // === Item Number (vertically centered between rows) ===
+              const itemNumberCenterY = y + totalItemHeight / 2;
+              ctx.fillStyle = '#020617';
+              ctx.font = `700 4.0px ${fontStack}`;
+              ctx.textAlign = 'left';
+              ctx.fillText(itemNumStr, itemNumberX, itemNumberCenterY + 1.2);
+              
+              // Advance y for next item
+              y += totalItemHeight + 5;
             });
           }
 
@@ -1286,6 +1667,10 @@ export function WafiWorksheetBuilder({
             ? { id: newId, prompt: 'Question?', options: ['Option A', 'Option B'], answer: 'a' }
             : s.type === 'math_box'
             ? { id: newId, prompt: 'Problem:', boxHeight: 26, answer: '' }
+            : s.type === 'passage_cloze'
+            ? { id: newId, passage: 'The men worked ( patient / patiently ) under the hot sun. They were very ___________.', answer: 'patiently' }
+            : s.type === 'tick_sentence'
+            ? { id: newId, sentenceA: 'Sentence A here...', sentenceB: 'Sentence B here...', answer: 'A' }
             : { id: newId, prompt: 'Question...', answer: '', lines: 3 };
         return { ...s, items: [...s.items, newItem] };
       })
@@ -1329,6 +1714,11 @@ export function WafiWorksheetBuilder({
       } else if (section.type === 'word_meaning') {
         const parts = line.split('|');
         return { id, word: parts[0]?.trim() || '', meaning: parts[1]?.trim() || '', sentence: '' };
+      } else if (section.type === 'passage_cloze') {
+        return { id, passage: line, answer: '' };
+      } else if (section.type === 'tick_sentence') {
+        const parts = line.split('|');
+        return { id, sentenceA: parts[0]?.trim() || '', sentenceB: parts[1]?.trim() || '', answer: 'A' };
       } else {
         return { id, prompt: line, answer: '', boxHeight: 26 };
       }
@@ -1640,17 +2030,56 @@ export function WafiWorksheetBuilder({
   // --- Main Render ---
   return (
     <div className="flex h-screen flex-col bg-gradient-to-br from-slate-50 to-slate-100 font-sans">
-      {/* HEADER */}
+      {/* CONSOLIDATED HEADER */}
       <div className="border-b border-slate-200 bg-white shadow-xs">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 sm:px-6 py-3.5 sm:py-4 gap-3">
           <div className="flex items-center gap-3 min-w-0">
+            {/* Back Button */}
+            {onBack && (
+              <button
+                onClick={onBack}
+                className="inline-flex items-center justify-center rounded-lg p-1.5 text-slate-600 hover:bg-slate-100 transition-colors shrink-0"
+                title="Go back to homework"
+                aria-label="Back to homework"
+              >
+                <ArrowLeft className="w-5 h-5" />
+              </button>
+            )}
+            {/* Title with Book Icon */}
             <BookMarked className="h-6 w-6 text-indigo-600 shrink-0" />
             <h1 className="text-lg sm:text-2xl font-bold text-slate-900 truncate">Wafi Worksheet Builder</h1>
+            {/* Editing Status Badge */}
             {activeSavedSheet && (
               <span className="hidden xl:inline-flex items-center gap-1.5 rounded-full bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 text-xs font-semibold text-emerald-700 truncate max-w-xs">
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
                 Editing: {worksheet.header.chapter || 'Worksheet'}
               </span>
+            )}
+            {/* Sync Status Badge */}
+            {isLoading ? (
+              <div className="hidden md:flex items-center gap-1 px-2 py-1 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-xs font-medium shrink-0">
+                <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+                <span>Syncing...</span>
+              </div>
+            ) : isAdmin ? (
+              <div className="hidden md:flex items-center gap-1 px-2 py-1 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 text-xs font-medium shrink-0">
+                {isOnline ? (
+                  <>
+                    <Cloud className="w-3 h-3" />
+                    <span>Cloud Synced</span>
+                  </>
+                ) : (
+                  <>
+                    <CloudOff className="w-3 h-3" />
+                    <span>Offline</span>
+                  </>
+                )}
+              </div>
+            ) : (
+              <div className="hidden md:flex items-center gap-1 px-2 py-1 rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 text-xs font-medium shrink-0">
+                <Eye className="w-3 h-3" />
+                <span>Read-Only</span>
+              </div>
             )}
           </div>
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
@@ -2008,6 +2437,56 @@ export function WafiWorksheetBuilder({
                           </>
                         )}
 
+                        {section.type === 'tick_sentence' && (
+                          <>
+                            <div className="mb-2">
+                              <label className="block text-xs font-semibold text-slate-600 mb-1">Sentence A</label>
+                              <textarea
+                                placeholder="Enter first sentence..."
+                                value={item.sentenceA || ''}
+                                onChange={(e) => updateItem(section.id, item.id, { sentenceA: e.target.value })}
+                                className="w-full rounded border border-slate-300 px-2 py-1 text-xs"
+                                rows={2}
+                              />
+                            </div>
+                            <div className="mb-2">
+                              <label className="block text-xs font-semibold text-slate-600 mb-1">Sentence B</label>
+                              <textarea
+                                placeholder="Enter second sentence..."
+                                value={item.sentenceB || ''}
+                                onChange={(e) => updateItem(section.id, item.id, { sentenceB: e.target.value })}
+                                className="w-full rounded border border-slate-300 px-2 py-1 text-xs"
+                                rows={2}
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-semibold text-slate-600 mb-1">Correct Sentence</label>
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={() => updateItem(section.id, item.id, { answer: 'A' })}
+                                  className={`flex-1 rounded px-2 py-1 text-xs font-semibold transition-colors ${
+                                    item.answer === 'A'
+                                      ? 'bg-indigo-600 text-white'
+                                      : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+                                  }`}
+                                >
+                                  A
+                                </button>
+                                <button
+                                  onClick={() => updateItem(section.id, item.id, { answer: 'B' })}
+                                  className={`flex-1 rounded px-2 py-1 text-xs font-semibold transition-colors ${
+                                    item.answer === 'B'
+                                      ? 'bg-indigo-600 text-white'
+                                      : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+                                  }`}
+                                >
+                                  B
+                                </button>
+                              </div>
+                            </div>
+                          </>
+                        )}
+
                         {section.type === 'mcq' && (
                           <>
                             <textarea
@@ -2066,6 +2545,73 @@ export function WafiWorksheetBuilder({
                           </>
                         )}
 
+                        {section.type === 'passage_cloze' && (
+                          <div className="space-y-2 mb-2">
+                            <div>
+                              <label className="block text-xs font-semibold text-slate-600 mb-1">Passage Text</label>
+                              <textarea
+                                placeholder="Paste or type the passage here. Use (word1 / word2) for bracket choices or ____ for blanks. Example: The men worked (patient / patiently) under the hot sun..."
+                                value={item.passage || ''}
+                                onChange={(e) => updateItem(section.id, item.id, { passage: e.target.value })}
+                                className="mb-2 block w-full rounded border border-slate-300 px-2 py-1 text-xs"
+                                rows={6}
+                              />
+                            </div>
+                            <div className="flex gap-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const textarea = document.getElementById(`passage-${item.id}`);
+                                  const currentText = item.passage || '';
+                                  const blank = '______';
+                                  if (textarea) {
+                                    const start = textarea.selectionStart ?? currentText.length;
+                                    const end = textarea.selectionEnd ?? currentText.length;
+                                    const newText = currentText.slice(0, start) + blank + currentText.slice(end);
+                                    updateItem(section.id, item.id, { passage: newText });
+                                    setTimeout(() => {
+                                      textarea.focus();
+                                      textarea.setSelectionRange(start + blank.length, start + blank.length);
+                                    }, 0);
+                                  } else {
+                                    updateItem(section.id, item.id, { passage: currentText ? `${currentText} ${blank}` : blank });
+                                  }
+                                }}
+                                className="inline-flex items-center gap-1 rounded bg-indigo-50 px-2 py-1 text-[11px] font-semibold text-indigo-700 border border-indigo-200 hover:bg-indigo-100 transition-colors shadow-2xs"
+                                title="Insert blank (6 underscores)"
+                              >
+                                <Plus className="h-3 w-3" />
+                                <span>Insert Blank</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const textarea = document.getElementById(`passage-${item.id}`);
+                                  const currentText = item.passage || '';
+                                  const bracket = ' ( / ) ';
+                                  if (textarea) {
+                                    const start = textarea.selectionStart ?? currentText.length;
+                                    const end = textarea.selectionEnd ?? currentText.length;
+                                    const newText = currentText.slice(0, start) + bracket + currentText.slice(end);
+                                    updateItem(section.id, item.id, { passage: newText });
+                                    setTimeout(() => {
+                                      textarea.focus();
+                                      textarea.setSelectionRange(start + 3, start + 3);
+                                    }, 0);
+                                  } else {
+                                    updateItem(section.id, item.id, { passage: currentText ? `${currentText} ${bracket}` : bracket });
+                                  }
+                                }}
+                                className="inline-flex items-center gap-1 rounded bg-indigo-50 px-2 py-1 text-[11px] font-semibold text-indigo-700 border border-indigo-200 hover:bg-indigo-100 transition-colors shadow-2xs"
+                                title="Insert bracket choice ( / )"
+                              >
+                                <Plus className="h-3 w-3" />
+                                <span>Insert Bracket ( / )</span>
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
                         {section.type === 'fill_blanks' && (
                           <div className="mb-1.5 flex items-center justify-between text-xs">
                             <span className="text-[11px] text-slate-500">
@@ -2099,7 +2645,7 @@ export function WafiWorksheetBuilder({
                           </div>
                         )}
 
-                        {!['matching', 'word_meaning', 'mcq', 'math_box'].includes(section.type) && (
+                        {!['matching', 'word_meaning', 'mcq', 'math_box', 'passage_cloze', 'tick_sentence'].includes(section.type) && (
                           <textarea
                             id={section.type === 'fill_blanks' ? `prompt-fb-${item.id}` : undefined}
                             placeholder={
@@ -2472,7 +3018,7 @@ export function WafiWorksheetBuilder({
 
                     {page.sections.map((section) => (
                       <section key={section.id} className="mb-5">
-                        <div className="mb-2 border-b border-slate-400 pb-1">
+                        <div className="border-b border-slate-400">
                           <h4 className="text-sm font-bold">
                             {section.title}
                             {section.isContinuation && (
@@ -2539,20 +3085,54 @@ export function WafiWorksheetBuilder({
 
                         {/* 3. Match Column A & B */}
                         {section.type === 'matching' && (
-                          <div className="text-sm">
-                            {!section.isContinuation && (
-                              <div className="grid grid-cols-2 gap-4 mb-2 bg-slate-100 p-2 font-bold rounded">
-                                <div>Column A</div>
-                                <div>Column B</div>
+                          <div className="text-sm" style={{ display: 'grid', gridTemplateColumns: '1fr 20px 1fr', gap: '20px', marginTop: '8px' }}>
+                            {/* Left Box (Column A) */}
+                            <div style={{ border: '1.5px solid #1e293b', borderRadius: '4px', overflow: 'hidden' }}>
+                              {!section.isContinuation && (
+                                <div className="matching-col-header" style={{ borderBottom: '1.5px solid #1e293b', background: '#f1f5f9', fontWeight: 700, textAlign: 'center', padding: '7px 10px' }}>Column A</div>
+                              )}
+                              <div>
+                                {section.items.map((item, itemIdx) => (
+                                  <div
+                                    key={item.id}
+                                    style={{
+                                      background: '#ffffff',
+                                      textAlign: 'center',
+                                      padding: '7px 10px',
+                                      borderTop: itemIdx === 0 ? '1.5px solid #1e293b' : 'none',
+                                      borderBottom: itemIdx < section.items.length - 1 ? '1px solid #64748b' : 'none'
+                                    }}
+                                  >
+                                    {item.left}
+                                  </div>
+                                ))}
                               </div>
-                            )}
-                            <div className="space-y-1">
-                              {section.items.map((item) => (
-                                <div key={item.id} className="grid grid-cols-2 gap-4 border border-slate-300 p-2 rounded">
-                                  <div>{item.left}</div>
-                                  <div>{item.right}</div>
-                                </div>
-                              ))}
+                            </div>
+
+                            {/* Center Gap (Empty) */}
+                            <div></div>
+
+                            {/* Right Box (Column B) */}
+                            <div style={{ border: '1.5px solid #1e293b', borderRadius: '4px', overflow: 'hidden' }}>
+                              {!section.isContinuation && (
+                                <div className="matching-col-header" style={{ borderBottom: '1.5px solid #1e293b', background: '#f1f5f9', fontWeight: 700, textAlign: 'center', padding: '7px 10px' }}>Column B</div>
+                              )}
+                              <div>
+                                {section.items.map((item, itemIdx) => (
+                                  <div
+                                    key={item.id}
+                                    style={{
+                                      background: '#ffffff',
+                                      textAlign: 'center',
+                                      padding: '7px 10px',
+                                      borderTop: itemIdx === 0 ? '1.5px solid #1e293b' : 'none',
+                                      borderBottom: itemIdx < section.items.length - 1 ? '1px solid #64748b' : 'none'
+                                    }}
+                                  >
+                                    {item.right}
+                                  </div>
+                                ))}
+                              </div>
                             </div>
                           </div>
                         )}
@@ -2639,12 +3219,165 @@ export function WafiWorksheetBuilder({
                             ))}
                           </ol>
                         )}
+
+                        {/* 8. Passage / Cloze */}
+                        {section.type === 'passage_cloze' && (
+                          <div className="text-sm">
+                            {section.items.map((item) => {
+                              const hasBrackets = /\(\s*[^/]+\s*\/\s*[^)]+\s*\)/g.test(item.passage || '');
+                              const hasBlanks = /_+/.test(item.passage || '');
+                              return (
+                                <div key={item.id} className="mb-4 text-justify leading-[2.65] text-slate-800">
+                                  {hasBrackets ? (
+                                    // Render with bracket choices
+                                    <span>
+                                      {(item.passage || '').split(/(\(\s*[^/]+\s*\/\s*[^)]+\s*\))/g).map((part, pIdx) => {
+                                        if (/^\(\s*[^/]+\s*\/\s*[^)]+\s*\)$/.test(part)) {
+                                          const options = part
+                                            .slice(1, -1)
+                                            .split('/')
+                                            .map((s) => s.trim());
+                                          return (
+                                            <span key={pIdx} className="font-semibold">
+                                              {`( ${options.join(' / ')} )`}
+                                            </span>
+                                          );
+                                        }
+                                        return <span key={pIdx}>{part}</span>;
+                                      })}
+                                    </span>
+                                  ) : hasBlanks ? (
+                                    // Render with underline blanks
+                                    <span>
+                                      {(item.passage || '').split(/(_+)/g).map((part, pIdx) =>
+                                        /^_+$/.test(part) ? (
+                                          <span
+                                            key={pIdx}
+                                            aria-label="blank writing space"
+                                            style={{
+                                              width: `${Math.max(60, part.length * 12)}px`,
+                                              maxWidth: '100%'
+                                            }}
+                                            className="inline-block border-b-2 border-slate-900 mx-1 align-baseline"
+                                          />
+                                        ) : (
+                                          <span key={pIdx}>{part}</span>
+                                        )
+                                      )}
+                                    </span>
+                                  ) : (
+                                    <span>{item.passage}</span>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        {/* 9. Tick Correct Sentence */}
+                        {section.type === 'tick_sentence' && (
+                          <ol className="text-sm" style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+                            {section.items.map((item, idx) => (
+                              <li 
+                                key={item.id} 
+                                className="mb-6"
+                                style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}
+                              >
+                                {/* Item Number (far left) */}
+                                <span 
+                                  className="font-bold"
+                                  style={{ 
+                                    minWidth: '20px',
+                                    lineHeight: '1.35', 
+                                    fontWeight: 700,
+                                    color: '#020617'
+                                  }}
+                                >
+                                  {section.startIndex + idx + 1}.
+                                </span>
+                                
+                                {/* Right Stack: 2 independent horizontal rows */}
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', flex: 1 }}>
+                                  {/* Row A */}
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    {/* Checkbox A */}
+                                    <div 
+                                      style={{
+                                        width: '15px',
+                                        height: '15px',
+                                        border: '1.5px solid #0f172a',
+                                        borderRadius: '2px',
+                                        flexShrink: 0
+                                      }}
+                                    />
+                                    {/* Label A */}
+                                    <span 
+                                      className="font-bold"
+                                      style={{ 
+                                        fontWeight: 700,
+                                        color: '#020617',
+                                        flexShrink: 0
+                                      }}
+                                    >
+                                      A
+                                    </span>
+                                    {/* Sentence A */}
+                                    <span 
+                                      className="text-slate-800"
+                                      style={{ 
+                                        color: '#1e293b',
+                                        lineHeight: '1.35'
+                                      }}
+                                    >
+                                      {item.sentenceA}
+                                    </span>
+                                  </div>
+                                  
+                                  {/* Row B */}
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    {/* Checkbox B */}
+                                    <div 
+                                      style={{
+                                        width: '15px',
+                                        height: '15px',
+                                        border: '1.5px solid #0f172a',
+                                        borderRadius: '2px',
+                                        flexShrink: 0
+                                      }}
+                                    />
+                                    {/* Label B */}
+                                    <span 
+                                      className="font-bold"
+                                      style={{ 
+                                        fontWeight: 700,
+                                        color: '#020617',
+                                        flexShrink: 0
+                                      }}
+                                    >
+                                      B
+                                    </span>
+                                    {/* Sentence B */}
+                                    <span 
+                                      className="text-slate-800"
+                                      style={{ 
+                                        color: '#1e293b',
+                                        lineHeight: '1.35'
+                                      }}
+                                    >
+                                      {item.sentenceB}
+                                    </span>
+                                  </div>
+                                </div>
+                              </li>
+                            ))}
+                          </ol>
+                        )}
                       </section>
                     ))}
                   </div>
 
                   {paginatedPages.length > 1 && (
-                    <div className="mt-8 text-right text-xs text-slate-500">
+                    <div className="text-right text-xs text-slate-500" style={{ flexShrink: 0, width: '100%', textAlign: 'right', paddingTop: '4px', lineHeight: 1 }}>
                       Page {page.pageNumber} of {paginatedPages.length}
                     </div>
                   )}
@@ -2671,7 +3404,9 @@ export function WafiWorksheetBuilder({
                           {section.items.map((item, idx) => (
                             <li key={item.id} className="text-slate-800">
                               <span className="font-semibold text-slate-900">
-                                {item.answer || '(No answer provided)'}
+                                {section.type === 'tick_sentence'
+                                  ? `${item.answer || 'N/A'}`
+                                  : item.answer || '(No answer provided)'}
                               </span>
                             </li>
                           ))}
@@ -2692,7 +3427,15 @@ export function WafiWorksheetBuilder({
           <div className="rounded-xl bg-white shadow-xl w-full max-w-md mx-auto overflow-hidden">
             <div className="border-b border-slate-200 px-6 py-4">
               <h2 className="text-lg font-bold text-slate-900">Bulk Paste Items</h2>
-              <p className="text-xs text-slate-600 mt-1">One item per line (for Matching/Word Meaning use "A | B")</p>
+              <p className="text-xs text-slate-600 mt-1">
+                {bulkModalSectionId && worksheet.sections.find(s => s.id === bulkModalSectionId)?.type === 'tick_sentence'
+                  ? 'One pair per line (format: "Sentence A | Sentence B")'
+                  : bulkModalSectionId && worksheet.sections.find(s => s.id === bulkModalSectionId)?.type === 'matching'
+                  ? 'One pair per line (format: "A | B")'
+                  : bulkModalSectionId && worksheet.sections.find(s => s.id === bulkModalSectionId)?.type === 'word_meaning'
+                  ? 'One word per line (format: "Word | Meaning")'
+                  : 'One item per line'}
+              </p>
             </div>
             <div className="p-6">
               <textarea
