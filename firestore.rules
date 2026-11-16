@@ -87,6 +87,14 @@ service cloud.firestore {
       );
     }
     
+    // ========== WORKSHEETS COLLECTION ==========
+    // Any authenticated user can read; only admin users can create, update, or delete.
+    
+    match /worksheets/{worksheetId} {
+      allow read: if isAuth();
+      allow create, update, delete: if isAdmin();
+    }
+    
     // ========== DEFAULT DENY ==========
     // All other collections: deny read and write
     

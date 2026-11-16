@@ -23,7 +23,10 @@ import {
   Search,
   Clock,
   Layers,
-  Sparkles
+  Sparkles,
+  Cloud,
+  CloudOff,
+  Lock
 } from 'lucide-react';
 
 // --- Section Types for Textbook Exercises ---
@@ -274,7 +277,26 @@ function paginateWorksheet(worksheet) {
   return pages;
 }
 
-export function WafiWorksheetBuilder() {
+/**
+ * WafiWorksheetBuilder Component
+ * 
+ * Props (optional, for Firestore integration):
+ * - isAdmin: boolean - whether user is an admin (default: true for backward compatibility)
+ * - isOnline: boolean - whether Firestore is available
+ * - worksheets: array - shared worksheets from Firestore
+ * - onSaveToFirestore: async function to save worksheet to Firestore
+ * - onDeleteFromFirestore: async function to delete worksheet from Firestore
+ * - onSaveActiveLocally: function to save active worksheet to localStorage
+ */
+export function WafiWorksheetBuilder({
+  isAdmin = true,
+  isOnline = true,
+  worksheets: firestoreWorksheets = [],
+  onSaveToFirestore = null,
+  onDeleteFromFirestore = null,
+  onSaveActiveLocally = null,
+  ...otherProps
+} = {}) {
   // Active worksheet state (persisted locally for 100% offline use)
   const [worksheet, setWorksheet] = useState(() => {
     try {
@@ -295,8 +317,13 @@ export function WafiWorksheetBuilder() {
     }
   });
 
-  // Saved chapter question bank (persisted locally)
+  // Saved chapter question bank (from Firestore for shared, or localStorage for local)
   const [savedChapters, setSavedChapters] = useState(() => {
+    // Prefer Firestore worksheets if available, otherwise fall back to localStorage
+    if (firestoreWorksheets && firestoreWorksheets.length > 0) {
+      return firestoreWorksheets;
+    }
+
     try {
       if (typeof window !== 'undefined' && window.localStorage) {
         const saved = localStorage.getItem(STORAGE_KEY_BANK);
@@ -316,6 +343,13 @@ export function WafiWorksheetBuilder() {
       return [{ ...DEFAULT_WORKSHEET, updatedAt: new Date().toISOString() }];
     }
   });
+
+  // Sync Firestore worksheets to state when they update
+  useEffect(() => {
+    if (firestoreWorksheets && firestoreWorksheets.length > 0) {
+      setSavedChapters(firestoreWorksheets);
+    }
+  }, [firestoreWorksheets]);
 
   // Active saved worksheet tracking
   const [editingSavedId, setEditingSavedId] = useState(() => {
@@ -383,7 +417,12 @@ export function WafiWorksheetBuilder() {
     } catch {
       // Ignore storage quota issues
     }
-  }, [worksheet]);
+
+    // If Firestore callback is available and user is admin, also save to cloud (debounced)
+    if (onSaveActiveLocally && typeof onSaveActiveLocally === 'function') {
+      onSaveActiveLocally(worksheet);
+    }
+  }, [worksheet, onSaveActiveLocally]);
 
   useEffect(() => {
     try {
@@ -1312,17 +1351,24 @@ export function WafiWorksheetBuilder() {
     showToast(`Added ${newItems.length} items`);
   };
 
-  // --- Saved Worksheets Management Actions ---
-  const handleUpdateSaved = () => {
+  // --- Saved Worksheets Management Actions (with Firestore support) ---
+  const handleUpdateSaved = async () => {
     if (!worksheet.header.chapter?.trim()) {
       showToast('Please set the chapter name first', 'error');
       return;
     }
+
     const updatedSheet = {
       ...worksheet,
       updatedAt: new Date().toISOString()
     };
     setWorksheet(updatedSheet);
+
+    // Save to Firestore if admin and callback available
+    if (isAdmin && onSaveToFirestore && typeof onSaveToFirestore === 'function') {
+      const success = await onSaveToFirestore(updatedSheet);
+      if (!success) return;
+    }
 
     if (editingSavedId && savedChapters.some((s) => s.id === editingSavedId)) {
       setSavedChapters((prev) =>
@@ -1339,7 +1385,7 @@ export function WafiWorksheetBuilder() {
     }
   };
 
-  const handleSaveAsNew = () => {
+  const handleSaveAsNew = async () => {
     if (!worksheet.header.chapter?.trim()) {
       showToast('Please set the chapter name first', 'error');
       return;
@@ -1350,6 +1396,13 @@ export function WafiWorksheetBuilder() {
       id: newId,
       updatedAt: new Date().toISOString()
     };
+
+    // Save to Firestore if admin and callback available
+    if (isAdmin && onSaveToFirestore && typeof onSaveToFirestore === 'function') {
+      const success = await onSaveToFirestore(newSheet);
+      if (!success) return;
+    }
+
     setWorksheet(newSheet);
     setEditingSavedId(newId);
     setSavedChapters((prev) => [newSheet, ...prev]);
@@ -1357,6 +1410,11 @@ export function WafiWorksheetBuilder() {
   };
 
   const loadAndEditWorksheet = (sheet) => {
+    // Non-admins can load but cannot edit
+    if (!isAdmin) {
+      showToast('Read-only mode. Contact an admin to edit worksheets.', 'info');
+    }
+
     const cloned = JSON.parse(JSON.stringify(sheet));
     const targetId = cloned.id || `sheet-${Date.now()}`;
     cloned.id = targetId;
@@ -1366,10 +1424,15 @@ export function WafiWorksheetBuilder() {
     setActiveTab(cloned.sections[0]?.id || 'sec-1');
     setIsSavedDrawerOpen(false);
     setMobileView('studio');
-    showToast(`Loaded "${cloned.header?.chapter || 'Worksheet'}" for editing`);
+    showToast(`Loaded "${cloned.header?.chapter || 'Worksheet'}" for viewing`);
   };
 
-  const duplicateSavedWorksheet = (sheet) => {
+  const duplicateSavedWorksheet = async (sheet) => {
+    if (!isAdmin) {
+      showToast('Only admins can duplicate worksheets', 'error');
+      return;
+    }
+
     const newId = `sheet-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const cloned = JSON.parse(JSON.stringify(sheet));
     const dupTitle = cloned.header?.chapter ? `${cloned.header.chapter} (Copy)` : 'Worksheet (Copy)';
@@ -1382,11 +1445,29 @@ export function WafiWorksheetBuilder() {
         chapter: dupTitle
       }
     };
+
+    // Save to Firestore if callback available
+    if (onSaveToFirestore && typeof onSaveToFirestore === 'function') {
+      const success = await onSaveToFirestore(duplicated);
+      if (!success) return;
+    }
+
     setSavedChapters((prev) => [duplicated, ...prev]);
     showToast(`Duplicated: "${dupTitle}"`);
   };
 
-  const deleteSavedWorksheet = (id) => {
+  const deleteSavedWorksheet = async (id) => {
+    if (!isAdmin) {
+      showToast('Only admins can delete worksheets', 'error');
+      return;
+    }
+
+    // Delete from Firestore if callback available
+    if (onDeleteFromFirestore && typeof onDeleteFromFirestore === 'function') {
+      const success = await onDeleteFromFirestore(id);
+      if (!success) return;
+    }
+
     setSavedChapters((prev) => prev.filter((w) => w.id !== id));
     if (editingSavedId === id) {
       setEditingSavedId(null);
@@ -1661,12 +1742,13 @@ export function WafiWorksheetBuilder() {
 
       {/* MAIN CONTENT */}
       <div className="flex flex-1 overflow-hidden">
-        {/* STUDIO PANEL */}
-        <div
-          className={`w-full lg:w-2/5 overflow-y-auto border-r border-slate-200 bg-white p-6 lg:block ${
-            mobileView !== 'studio' ? 'hidden' : ''
-          }`}
-        >
+        {/* STUDIO PANEL (Admin Edit Mode) */}
+        {isAdmin ? (
+          <div
+            className={`w-full lg:w-2/5 overflow-y-auto border-r border-slate-200 bg-white p-6 lg:block ${
+              mobileView !== 'studio' ? 'hidden' : ''
+            }`}
+          >
           {/* ACTIVE EDITING BANNER & SAVE ACTIONS */}
           {activeSavedSheet ? (
             <div className="mb-5 rounded-xl border border-indigo-200 bg-gradient-to-r from-indigo-50/90 via-white to-purple-50/60 p-3.5 shadow-2xs">
@@ -2274,6 +2356,51 @@ export function WafiWorksheetBuilder() {
             </div>
           )}
         </div>
+        ) : (
+          // READ-ONLY MODE FOR NON-ADMINS
+          <div
+            className={`w-full lg:w-2/5 overflow-y-auto border-r border-slate-200 bg-white p-6 lg:block ${
+              mobileView !== 'studio' ? 'hidden' : ''
+            }`}
+          >
+            <div className="flex items-center gap-3 mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+              <Eye className="h-5 w-5 text-blue-600 flex-shrink-0" />
+              <div>
+                <p className="font-semibold text-blue-900 text-sm">View-Only Mode</p>
+                <p className="text-xs text-blue-700 mt-1">You can view and print worksheets. Contact an admin to edit.</p>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 uppercase mb-2">Saved Worksheets</label>
+                {savedChapters.length === 0 ? (
+                  <p className="text-sm text-slate-500 italic">No worksheets available</p>
+                ) : (
+                  <div className="space-y-2 max-h-96 overflow-y-auto">
+                    {savedChapters.map((sheet) => (
+                      <button
+                        key={sheet.id}
+                        onClick={() => loadAndEditWorksheet(sheet)}
+                        className="w-full p-3 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 hover:border-slate-300 text-left transition-colors"
+                      >
+                        <p className="font-semibold text-sm text-slate-900 truncate">
+                          {sheet.header?.chapter || 'Untitled'}
+                        </p>
+                        <p className="text-xs text-slate-500 mt-1">
+                          {sheet.header?.subject} • {countWorksheetItems(sheet)} items
+                        </p>
+                        <p className="text-[11px] text-slate-400 mt-1">
+                          Updated: {formatLastModified(sheet.updatedAt)}
+                        </p>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* PREVIEW PANEL */}
         <div

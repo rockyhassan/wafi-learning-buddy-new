@@ -1,11 +1,11 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import React, { useRef } from 'react';
 import { ArrowLeft } from 'lucide-react';
+import { useAccess } from '@/lib/access-store';
 
-// Import the complete, unmodified original worksheet builder component
-// This is the full 122KB implementation with 100% feature parity
-const WafiWorksheetBuilderFull = React.lazy(() =>
-  import('../../components/WafiWorksheetBuilderFull').then((mod) => ({
+// Import the wrapper component that adds Firestore cloud persistence
+const WafiWorksheetBuilderWrapper = React.lazy(() =>
+  import('../../components/WafiWorksheetBuilderWrapper').then((mod) => ({
     default: mod.default,
   }))
 );
@@ -21,7 +21,7 @@ export const Route = createFileRoute('/homework/worksheet-builder')({
       { property: 'og:title', content: 'Worksheet Builder — Wafi Learning Buddy' },
       {
         property: 'og:description',
-        content: 'Complete worksheet builder with PDF export and answer keys',
+        content: 'Complete worksheet builder with PDF export, answer keys, and cloud persistence',
       },
     ],
   }),
@@ -59,7 +59,7 @@ function WorksheetBuilderPage() {
             </div>
           }
         >
-          <WafiWorksheetBuilderFull />
+          <WafiWorksheetBuilderWrapper />
         </React.Suspense>
       </div>
     </div>
