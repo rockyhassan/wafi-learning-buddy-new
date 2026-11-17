@@ -163,22 +163,22 @@ const PAGE_1_HEADER_MM = 38;
 
 function estimateItemHeightMm(sectionType, item) {
   const promptLen = (item.prompt || item.passage || '').length;
-  const wrappedTextLines = Math.max(1, Math.ceil(promptLen / 76));
+  const wrappedTextLines = Math.max(1, Math.ceil(promptLen / 68));
 
   switch (sectionType) {
     case 'fill_blanks':
-      return wrappedTextLines * 7.5 + 3.5;
+      return wrappedTextLines * 8.2 + 3.8;
     case 'true_false':
-      return wrappedTextLines * 5.2 + 4.5;
+      return wrappedTextLines * 5.8 + 4.2;
     case 'short_qa':
-      return wrappedTextLines * 5.2 + (Number(item.lines) || 3) * 9.5 + 3.5;
+      return wrappedTextLines * 5.8 + (Number(item.lines) || 3) * 9.5 + 3.8;
     case 'mcq':
-      return wrappedTextLines * 5.4 + 12;
+      return wrappedTextLines * 5.8 + 13.5;
     case 'math_box':
       return wrappedTextLines * 5.4 + (Number(item.boxHeight) || 26) + 4;
     case 'passage_cloze':
-      // Passage with generous line height (2.65): 6.8mm per line + padding
-      return wrappedTextLines * 6.8 + 6;
+      // Passage with generous line height (2.65): 7.4mm per line + padding
+      return wrappedTextLines * 7.4 + 6;
     case 'matching':
       // Header (~7mm) + separator (~4.5mm) + per item (8.5mm including borders)
       return 7.6 + (item && item.left ? 8.5 : 0);
@@ -188,9 +188,9 @@ function estimateItemHeightMm(sectionType, item) {
       // Two sentences per item (~20 chars each avg), ~4.5mm each + spacing
       const sentenceALen = (item.sentenceA || '').length;
       const sentenceBLen = (item.sentenceB || '').length;
-      const wrappedA = Math.ceil(sentenceALen / 76);
-      const wrappedB = Math.ceil(sentenceBLen / 76);
-      return (Math.max(1, wrappedA) + Math.max(1, wrappedB)) * 5.2 + 3.8;
+      const wrappedA = Math.ceil(sentenceALen / 68);
+      const wrappedB = Math.ceil(sentenceBLen / 68);
+      return (Math.max(1, wrappedA) + Math.max(1, wrappedB)) * 5.7 + 4.2;
     default:
       return wrappedTextLines * 5.5 + 5;
   }
@@ -233,7 +233,7 @@ function paginateWorksheet(worksheet) {
 
   for (const section of worksheet.sections) {
     const sectionHeaderMm =
-      section.type === 'matching' || section.type === 'word_meaning' ? 15.5 : 9.5;
+      section.type === 'matching' || section.type === 'word_meaning' ? 16.5 : 10.5;
 
     if (!section.items || section.items.length === 0) {
       if (remainingMm < sectionHeaderMm) pushNewPage();
@@ -553,7 +553,7 @@ export function WafiWorksheetBuilder({
 
     const styleEl = doc.createElement('style');
     styleEl.textContent = `
-      @page { size: A4 portrait; margin: 6mm; }
+      @page { size: A4 portrait; margin: 6mm 6mm 4mm 6mm; }
       * { box-sizing: border-box; }
       body {
         margin: 0;
@@ -570,10 +570,10 @@ export function WafiWorksheetBuilder({
       }
       .a4-sheet {
         width: 198mm;
-        height: 284mm;
-        min-height: 284mm;
+        height: 286.5mm;
+        min-height: 286.5mm;
         position: relative;
-        padding: 5mm 4mm 3mm 12mm;
+        padding: 5mm 4mm 1.5mm 12mm;
         margin: 0 auto;
         background: #ffffff;
         display: flex;
@@ -618,12 +618,12 @@ export function WafiWorksheetBuilder({
       }
       h2 { font-size: 18px; font-weight: 700; }
       h3 { font-size: 15px; font-weight: 700; }
-      h4 { font-size: 14px; font-weight: 700; }
+      h4 { font-size: 16px; font-weight: 700; }
       .grid-cols-3 {
         display: grid;
         grid-template-columns: repeat(3, 1fr);
         gap: 16px;
-        font-size: 14px;
+        font-size: 15.5px;
       }
       .grid-cols-3 > div { display: flex; align-items: baseline; gap: 6px; }
       .font-bold { font-weight: 700; }
@@ -645,6 +645,7 @@ export function WafiWorksheetBuilder({
         padding-bottom: 0;
       }
       section > .border-b h4 {
+        font-size: 16px;
         margin: 0;
         padding: 0;
         padding-bottom: 3px;
@@ -653,8 +654,8 @@ export function WafiWorksheetBuilder({
       }
       ol { list-style: none; margin: 0; padding: 0 0 0 4px; }
       li {
-        margin-bottom: 7px;
-        font-size: 14.5px;
+        margin-bottom: 8px;
+        font-size: 16px;
         break-inside: avoid;
         page-break-inside: avoid;
       }
@@ -703,7 +704,7 @@ export function WafiWorksheetBuilder({
       table {
         width: 100%;
         border-collapse: collapse;
-        font-size: 14px;
+        font-size: 15.5px;
       }
       th, td {
         border: 1px solid #1e293b;
@@ -716,7 +717,7 @@ export function WafiWorksheetBuilder({
         grid-template-columns: repeat(2, 1fr);
         gap: 6px 24px;
         margin-top: 6px;
-        font-size: 13.5px;
+        font-size: 15px;
       }
       .grid-cols-2 > div { display: flex; align-items: center; gap: 8px; }
       
@@ -782,7 +783,7 @@ export function WafiWorksheetBuilder({
       }
       
       /* === TEXT UTILITIES === */
-      .text-sm { font-size: 14px; line-height: 1.4286; }
+      .text-sm { font-size: 15.5px; line-height: 1.45; }
       .text-xs { font-size: 12px; line-height: 1.3333; }
       .text-justify { text-align: justify; }
       .text-slate-600 { color: #475569; }
@@ -859,7 +860,7 @@ export function WafiWorksheetBuilder({
         align-items: center;
       }
       .answer-key-page ul { padding-left: 20px; margin: 6px 0 12px 0; font-size: 13.5px; }
-      .answer-key-page li { display: list-item; list-style-type: disc; margin-bottom: 4px; }
+      .answer-key-page li { font-size: 13.5px; margin-bottom: 4px; display: list-item; list-style-type: disc; }
     `;
     doc.head.appendChild(styleEl);
 
@@ -3019,7 +3020,7 @@ export function WafiWorksheetBuilder({
                     {page.sections.map((section) => (
                       <section key={section.id} className="mb-5">
                         <div className="border-b border-slate-400">
-                          <h4 className="text-sm font-bold">
+                          <h4 className="text-base font-bold">
                             {section.title}
                             {section.isContinuation && (
                               <span className="text-xs italic font-normal text-slate-500"> (continued)</span>
@@ -3029,7 +3030,7 @@ export function WafiWorksheetBuilder({
 
                         {/* 1. Fill in the Blanks */}
                         {section.type === 'fill_blanks' && (
-                          <ol className="fill-blanks-list text-sm">
+                          <ol className="fill-blanks-list text-[16px]">
                             {section.items.map((item, idx) => {
                               const hasBlanks = /_+/.test(item.prompt || '');
                               return (
@@ -3067,7 +3068,7 @@ export function WafiWorksheetBuilder({
 
                         {/* 2. True / False */}
                         {section.type === 'true_false' && (
-                          <ol className="space-y-4 text-sm">
+                          <ol className="space-y-4 text-[16px]">
                             {section.items.map((item, idx) => (
                               <li key={item.id} className="flex items-baseline justify-between gap-3">
                                 <div className="flex items-baseline gap-3">
@@ -3085,7 +3086,7 @@ export function WafiWorksheetBuilder({
 
                         {/* 3. Match Column A & B */}
                         {section.type === 'matching' && (
-                          <div className="text-sm" style={{ display: 'grid', gridTemplateColumns: '1fr 20px 1fr', gap: '20px', marginTop: '8px' }}>
+                          <div className="text-[15.5px]" style={{ display: 'grid', gridTemplateColumns: '1fr 20px 1fr', gap: '20px', marginTop: '8px' }}>
                             {/* Left Box (Column A) */}
                             <div style={{ border: '1.5px solid #1e293b', borderRadius: '4px', overflow: 'hidden' }}>
                               {!section.isContinuation && (
@@ -3139,7 +3140,7 @@ export function WafiWorksheetBuilder({
 
                         {/* 4. Word Meanings / Sentences */}
                         {section.type === 'word_meaning' && (
-                          <div className="text-sm">
+                          <div className="text-[15.5px]">
                             {!section.isContinuation && (
                               <div className="grid grid-cols-3 gap-2 mb-2 bg-slate-100 p-2 font-bold rounded">
                                 <div>Word</div>
@@ -3161,7 +3162,7 @@ export function WafiWorksheetBuilder({
 
                         {/* 5. Short / Broad Q&A */}
                         {section.type === 'short_qa' && (
-                          <ol className="space-y-3 text-sm">
+                          <ol className="space-y-3 text-[16px]">
                             {section.items.map((item, idx) => (
                               <li key={item.id}>
                                 <div className="flex items-baseline gap-3 mb-2">
@@ -3178,7 +3179,7 @@ export function WafiWorksheetBuilder({
 
                         {/* 6. Multiple Choice (MCQ) */}
                         {section.type === 'mcq' && (
-                          <ol className="space-y-3 text-sm">
+                          <ol className="space-y-3 text-[16px]">
                             {section.items.map((item, idx) => (
                               <li key={item.id}>
                                 <div className="flex items-baseline gap-3 mb-1.5">
@@ -3200,7 +3201,7 @@ export function WafiWorksheetBuilder({
 
                         {/* 7. Math / Work Box */}
                         {section.type === 'math_box' && (
-                          <ol className="space-y-3 text-sm">
+                          <ol className="space-y-3 text-[16px]">
                             {section.items.map((item, idx) => (
                               <li key={item.id}>
                                 <div className="flex items-baseline gap-3 mb-2">
@@ -3222,7 +3223,7 @@ export function WafiWorksheetBuilder({
 
                         {/* 8. Passage / Cloze */}
                         {section.type === 'passage_cloze' && (
-                          <div className="text-sm">
+                          <div className="text-[15.5px]">
                             {section.items.map((item) => {
                               const hasBrackets = /\(\s*[^/]+\s*\/\s*[^)]+\s*\)/g.test(item.passage || '');
                               const hasBlanks = /_+/.test(item.passage || '');
@@ -3276,7 +3277,7 @@ export function WafiWorksheetBuilder({
 
                         {/* 9. Tick Correct Sentence */}
                         {section.type === 'tick_sentence' && (
-                          <ol className="text-sm" style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+                          <ol className="text-[16px]" style={{ listStyle: 'none', margin: 0, padding: 0 }}>
                             {section.items.map((item, idx) => (
                               <li 
                                 key={item.id} 
