@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useMemo } from 'react';
 import {
   Printer,
   Plus,
@@ -157,46 +157,48 @@ const DEFAULT_WORKSHEET = {
 const STORAGE_KEY_BANK = 'wafi_hybrid_book_bank_v2';
 const STORAGE_KEY_ACTIVE = 'wafi_hybrid_active_sheet_v2';
 
-// --- Estimate vertical height (in mm) per block so content flows across A4 pages ---
-const A4_CONTENT_BUDGET_MM = 274;
-const PAGE_1_HEADER_MM = 38;
+// --- Print and Layout Budget Constants (A4 Interior Height: 274.5mm) ---
+export const TARGET_INTERIOR_MM = 271.5; // Leaves safe 3.0mm buffer inside 274.5mm container
+export const A4_CONTENT_BUDGET_MM = 271.5;
+export const PAGE_1_HEADER_MM = 34.5;
+export const PX_TO_MM = 25.4 / 96;
 
-function estimateItemHeightMm(sectionType, item) {
+const useIsomorphicLayoutEffect = typeof window !== 'undefined' ? useLayoutEffect : useEffect;
+
+export function estimateItemHeightMm(sectionType, item) {
   const promptLen = (item.prompt || item.passage || '').length;
-  const wrappedTextLines = Math.max(1, Math.ceil(promptLen / 68));
+  const wrappedTextLines = Math.max(1, Math.ceil(promptLen / 76));
 
   switch (sectionType) {
     case 'fill_blanks':
       return wrappedTextLines * 8.2 + 3.8;
     case 'true_false':
-      return wrappedTextLines * 5.8 + 4.2;
+      return wrappedTextLines * 5.0 + 4.2;
     case 'short_qa':
-      return wrappedTextLines * 5.8 + (Number(item.lines) || 3) * 9.5 + 3.8;
+      return wrappedTextLines * 5.8 + (Number(item.lines) || 3) * 10.5 + 4.2;
     case 'mcq':
       return wrappedTextLines * 5.8 + 13.5;
     case 'math_box':
       return wrappedTextLines * 5.4 + (Number(item.boxHeight) || 26) + 4;
     case 'passage_cloze':
-      // Passage with generous line height (2.65): 7.4mm per line + padding
       return wrappedTextLines * 7.4 + 6;
     case 'matching':
-      // Header (~7mm) + separator (~4.5mm) + per item (8.5mm including borders)
       return 7.6 + (item && item.left ? 8.5 : 0);
     case 'word_meaning':
       return 7.6;
-    case 'tick_sentence':
-      // Two sentences per item (~20 chars each avg), ~4.5mm each + spacing
+    case 'tick_sentence': {
       const sentenceALen = (item.sentenceA || '').length;
       const sentenceBLen = (item.sentenceB || '').length;
-      const wrappedA = Math.ceil(sentenceALen / 68);
-      const wrappedB = Math.ceil(sentenceBLen / 68);
+      const wrappedA = Math.ceil(sentenceALen / 76);
+      const wrappedB = Math.ceil(sentenceBLen / 76);
       return (Math.max(1, wrappedA) + Math.max(1, wrappedB)) * 5.7 + 4.2;
+    }
     default:
       return wrappedTextLines * 5.5 + 5;
   }
 }
 
-function formatLastModified(dateString) {
+export function formatLastModified(dateString) {
   if (!dateString) return 'Recently';
   try {
     const d = new Date(dateString);
@@ -213,12 +215,14 @@ function formatLastModified(dateString) {
   }
 }
 
-function countWorksheetItems(sheet) {
+export function countWorksheetItems(sheet) {
   if (!sheet || !Array.isArray(sheet.sections)) return 0;
   return sheet.sections.reduce((total, sec) => total + (sec.items?.length || 0), 0);
 }
 
-function paginateWorksheet(worksheet) {
+// Fallback heuristic pagination for instant SSR and initial render
+export function paginateWorksheet(worksheet) {
+  if (!worksheet || !Array.isArray(worksheet.sections)) return [];
   const pages = [];
   let currentPage = { pageNumber: 1, sections: [] };
   let remainingMm = A4_CONTENT_BUDGET_MM - PAGE_1_HEADER_MM;
@@ -233,7 +237,7 @@ function paginateWorksheet(worksheet) {
 
   for (const section of worksheet.sections) {
     const sectionHeaderMm =
-      section.type === 'matching' || section.type === 'word_meaning' ? 16.5 : 10.5;
+      section.type === 'matching' || section.type === 'word_meaning' ? 15.5 : 9.0;
 
     if (!section.items || section.items.length === 0) {
       if (remainingMm < sectionHeaderMm) pushNewPage();
@@ -247,10 +251,10 @@ function paginateWorksheet(worksheet) {
       continue;
     }
 
-    if (section.type === 'matching') {
+    if (section.type === 'matching' || section.type === 'word_meaning') {
       const totalMatchingMm =
         sectionHeaderMm +
-        section.items.reduce((sum, it) => sum + estimateItemHeightMm('matching', it), 0) +
+        section.items.reduce((sum, it) => sum + estimateItemHeightMm(section.type, it), 0) +
         4;
       if (remainingMm < totalMatchingMm && currentPage.sections.length > 0) {
         pushNewPage();
@@ -303,6 +307,789 @@ function paginateWorksheet(worksheet) {
   return pages;
 }
 
+// True Height Measurement & Greedy Slicing against TARGET_INTERIOR_MM (271.5mm)
+export function measureAndPaginate(container, sheet, showHeader = true) {
+  if (!container || !sheet || !Array.isArray(sheet.sections)) {
+    return paginateWorksheet(sheet);
+  }
+
+  const pages = [];
+  let currentPage = { pageNumber: 1, sections: [] };
+  let currentUsedMm = 0;
+
+  // 1. Header measurement (Page 1)
+  if (showHeader) {
+    const headerEl = container.querySelector('[data-measure-role="header"]');
+    if (headerEl) {
+      const rectH = headerEl.getBoundingClientRect().height * PX_TO_MM;
+      const style = window.getComputedStyle(headerEl);
+      const mt = (parseFloat(style.marginTop) || 0) * PX_TO_MM;
+      const mb = (parseFloat(style.marginBottom) || 0) * PX_TO_MM;
+      currentUsedMm += mt + rectH + mb;
+    }
+  }
+
+  const pushNewPage = () => {
+    currentPage.predictedHeightMm = currentUsedMm;
+    pages.push(currentPage);
+    currentPage = { pageNumber: pages.length + 1, sections: [] };
+    currentUsedMm = 0;
+  };
+
+  const SEC_GAP_MM = 18 * PX_TO_MM; // margin-bottom: 18px
+
+  sheet.sections.forEach((sec, secIdx) => {
+    const secHeaderEl = container.querySelector(`[data-measure-section-header="${secIdx}"]`);
+    const contHeaderEl = container.querySelector(`[data-measure-section-cont-header="${secIdx}"]`);
+
+    const getHeaderFootprintMm = (el) => {
+      if (!el) return 10.5;
+      const rectH = el.getBoundingClientRect().height * PX_TO_MM;
+      const style = window.getComputedStyle(el);
+      const mt = (parseFloat(style.marginTop) || 0) * PX_TO_MM;
+      const mb = (parseFloat(style.marginBottom) || 0) * PX_TO_MM;
+      return mt + rectH + mb;
+    };
+
+    const normalHeaderMm = getHeaderFootprintMm(secHeaderEl);
+    const contHeaderMm = getHeaderFootprintMm(contHeaderEl);
+
+    // Empty section
+    if (!sec.items || sec.items.length === 0) {
+      const sectionTotalMm = normalHeaderMm + SEC_GAP_MM;
+      if (currentUsedMm + sectionTotalMm > TARGET_INTERIOR_MM && currentPage.sections.length > 0) {
+        pushNewPage();
+      }
+      currentPage.sections.push({
+        ...sec,
+        startIndex: 0,
+        isContinuation: false,
+        items: []
+      });
+      currentUsedMm += sectionTotalMm;
+      return;
+    }
+
+    // Atomic sections (matching, word_meaning): keep intact on one page unless taller than full page
+    if (sec.type === 'matching' || sec.type === 'word_meaning') {
+      const atomicEl = container.querySelector(`[data-measure-atomic="${secIdx}"]`);
+      let atomicMm = 0;
+      if (atomicEl) {
+        const rectH = atomicEl.getBoundingClientRect().height * PX_TO_MM;
+        const style = window.getComputedStyle(atomicEl);
+        const mt = (parseFloat(style.marginTop) || 0) * PX_TO_MM;
+        const mb = (parseFloat(style.marginBottom) || 0) * PX_TO_MM;
+        atomicMm = mt + rectH + mb;
+      }
+      const sectionTotalMm = normalHeaderMm + atomicMm + SEC_GAP_MM;
+
+      if (currentUsedMm + sectionTotalMm > TARGET_INTERIOR_MM && currentPage.sections.length > 0) {
+        pushNewPage();
+      }
+
+      currentPage.sections.push({
+        ...sec,
+        startIndex: 0,
+        isContinuation: false,
+        items: [...sec.items]
+      });
+      currentUsedMm += sectionTotalMm;
+      return;
+    }
+
+    // Non-atomic sections: item-by-item measurement with margin collapsing
+    let itemIdx = 0;
+    let isContinuation = false;
+
+    while (itemIdx < sec.items.length) {
+      const headerCostMm = isContinuation ? contHeaderMm : normalHeaderMm;
+
+      const firstItemEl = container.querySelector(`[data-measure-item="${secIdx}-${itemIdx}"]`);
+      const firstItemRectH = firstItemEl ? firstItemEl.getBoundingClientRect().height * PX_TO_MM : 20;
+
+      const minNeededMm = headerCostMm + firstItemRectH;
+
+      if (currentUsedMm + minNeededMm > TARGET_INTERIOR_MM && currentPage.sections.length > 0) {
+        pushNewPage();
+      }
+
+      const activeHeaderCostMm = isContinuation ? contHeaderMm : normalHeaderMm;
+      let pageUsedSecMm = activeHeaderCostMm;
+      const pageItems = [];
+      const startIndex = itemIdx;
+      let prevItemMbPx = 0;
+
+      while (itemIdx < sec.items.length) {
+        const itemEl = container.querySelector(`[data-measure-item="${secIdx}-${itemIdx}"]`);
+        const rectH = itemEl ? itemEl.getBoundingClientRect().height * PX_TO_MM : 20;
+        const style = itemEl ? window.getComputedStyle(itemEl) : null;
+        const mtPx = style ? (parseFloat(style.marginTop) || 0) : 0;
+        const mbPx = style ? (parseFloat(style.marginBottom) || 0) : 0;
+
+        const collapsedGapPx = pageItems.length === 0 ? mtPx : Math.max(prevItemMbPx, mtPx);
+        const itemDeltaMm = (collapsedGapPx * PX_TO_MM) + rectH;
+
+        if (currentUsedMm + pageUsedSecMm + itemDeltaMm > TARGET_INTERIOR_MM && pageItems.length > 0) {
+          break;
+        }
+
+        pageItems.push(sec.items[itemIdx]);
+        pageUsedSecMm += itemDeltaMm;
+        prevItemMbPx = mbPx;
+        itemIdx++;
+      }
+
+      currentPage.sections.push({
+        ...sec,
+        startIndex,
+        isContinuation,
+        items: pageItems
+      });
+
+      pageUsedSecMm += SEC_GAP_MM;
+      currentUsedMm += pageUsedSecMm;
+
+      if (itemIdx < sec.items.length) {
+        pushNewPage();
+        isContinuation = true;
+      }
+    }
+  });
+
+  if (currentPage.sections.length > 0 || pages.length === 0) {
+    currentPage.predictedHeightMm = currentUsedMm;
+    pages.push(currentPage);
+  }
+
+  return pages;
+}
+
+// Exact shared print and preview typography & layout stylesheet (Scoped to worksheet containers)
+export function getWorksheetPrintCss(fontStack, options = false) {
+  const isStandalone = typeof options === 'boolean' ? options : Boolean(options?.standalone);
+
+  const standaloneHeader = isStandalone
+    ? `
+    @page { size: A4 portrait; margin: 6mm 6mm 4mm 6mm; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 0;
+      background: #ffffff;
+      color: #020617;
+      font-family: ${fontStack};
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+  `
+    : '';
+
+  return `
+    ${standaloneHeader}
+    .a4-sheet,
+    .worksheet-measure-harness,
+    .worksheet-measure-container {
+      box-sizing: border-box;
+      color: #020617;
+      font-family: ${fontStack};
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    .a4-sheet *,
+    .worksheet-measure-harness *,
+    .worksheet-measure-container * {
+      box-sizing: border-box;
+    }
+    .a4-sheet h1, .a4-sheet h2, .a4-sheet h3, .a4-sheet h4, .a4-sheet h5, .a4-sheet h6, .a4-sheet p,
+    .worksheet-measure-harness h1, .worksheet-measure-harness h2, .worksheet-measure-harness h3, .worksheet-measure-harness h4, .worksheet-measure-harness h5, .worksheet-measure-harness h6, .worksheet-measure-harness p,
+    .worksheet-measure-container h1, .worksheet-measure-container h2, .worksheet-measure-container h3, .worksheet-measure-container h4, .worksheet-measure-container h5, .worksheet-measure-container h6, .worksheet-measure-container p {
+      margin: 0;
+      padding: 0;
+    }
+    .a4-sheet {
+      width: 198mm;
+      height: 286.5mm;
+      min-height: 286.5mm;
+      position: relative;
+      padding: 5mm 4mm 7mm 12mm;
+      margin: 0 auto;
+      background: #ffffff;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      page-break-after: always;
+      break-after: page;
+    }
+    .a4-sheet:last-child {
+      page-break-after: auto;
+      break-after: auto;
+    }
+    .a4-sheet > div:first-child {
+      overflow: hidden;
+    }
+    .a4-sheet > div:first-child > .border-2,
+    .worksheet-measure-harness [data-measure-role="header"],
+    .worksheet-measure-container [data-measure-role="header"] {
+      border: 2px solid #0f172a;
+      padding: 14px 16px;
+      margin-bottom: 18px;
+    }
+    .a4-sheet .text-center,
+    .worksheet-measure-harness .text-center,
+    .worksheet-measure-container .text-center {
+      text-align: center;
+    }
+    .a4-sheet .border-b.border-slate-400,
+    .worksheet-measure-harness .border-b.border-slate-400,
+    .worksheet-measure-container .border-b.border-slate-400 {
+      border-bottom: 1px solid #94a3b8;
+      padding-bottom: 8px;
+      margin-bottom: 10px;
+    }
+    .a4-sheet .sheet-header-title,
+    .worksheet-measure-harness .sheet-header-title,
+    .worksheet-measure-container .sheet-header-title {
+      margin: 0;
+      font-size: 10.5pt;
+      font-weight: 600;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: #475569;
+      text-align: center;
+      line-height: 1.25;
+    }
+    .a4-sheet .sheet-header-chapter,
+    .worksheet-measure-harness .sheet-header-chapter,
+    .worksheet-measure-container .sheet-header-chapter {
+      margin: 3px 0 0 0;
+      font-size: 17.5pt;
+      font-weight: 700;
+      letter-spacing: 0.01em;
+      color: #0f172a;
+      text-align: center;
+      line-height: 1.25;
+    }
+    .a4-sheet h2,
+    .worksheet-measure-harness h2,
+    .worksheet-measure-container h2 {
+      font-size: 18px;
+      font-weight: 700;
+    }
+    .a4-sheet h3,
+    .worksheet-measure-harness h3,
+    .worksheet-measure-container h3 {
+      font-size: 15px;
+      font-weight: 700;
+    }
+    .a4-sheet h4,
+    .worksheet-measure-harness h4,
+    .worksheet-measure-container h4 {
+      font-size: 16px;
+      font-weight: 700;
+    }
+    .a4-sheet .grid-cols-3,
+    .worksheet-measure-harness .grid-cols-3,
+    .worksheet-measure-container .grid-cols-3 {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+      font-size: 15.5px;
+    }
+    .a4-sheet .grid-cols-3 > div,
+    .worksheet-measure-harness .grid-cols-3 > div,
+    .worksheet-measure-container .grid-cols-3 > div {
+      display: flex;
+      align-items: baseline;
+      gap: 6px;
+    }
+    .a4-sheet .font-bold,
+    .worksheet-measure-harness .font-bold,
+    .worksheet-measure-container .font-bold {
+      font-weight: 700;
+    }
+    .a4-sheet .font-semibold,
+    .worksheet-measure-harness .font-semibold,
+    .worksheet-measure-container .font-semibold {
+      font-weight: 600;
+    }
+    .a4-sheet .font-medium,
+    .worksheet-measure-harness .font-medium,
+    .worksheet-measure-container .font-medium {
+      font-weight: 500;
+    }
+    .a4-sheet .italic,
+    .worksheet-measure-harness .italic,
+    .worksheet-measure-container .italic {
+      font-style: italic;
+    }
+    .a4-sheet .border-dotted,
+    .worksheet-measure-harness .border-dotted,
+    .worksheet-measure-container .border-dotted {
+      flex: 1;
+      border-bottom: 1px dotted #475569;
+      padding: 0 4px;
+    }
+    .a4-sheet .border-dotted.font-bold,
+    .worksheet-measure-harness .border-dotted.font-bold,
+    .worksheet-measure-container .border-dotted.font-bold {
+      font-weight: 700;
+    }
+    .a4-sheet section,
+    .worksheet-measure-harness section,
+    .worksheet-measure-container section {
+      margin-bottom: 18px;
+    }
+    .a4-sheet section > .border-b,
+    .worksheet-measure-harness section > .border-b,
+    .worksheet-measure-container section > .border-b {
+      border-bottom: none !important;
+      margin-bottom: 8px;
+      padding-bottom: 0;
+    }
+    .a4-sheet section > .border-b h4,
+    .worksheet-measure-harness section > .border-b h4,
+    .worksheet-measure-container section > .border-b h4 {
+      font-size: 16px;
+      margin: 0;
+      padding: 0;
+      padding-bottom: 3px;
+      border-bottom: 1px solid #94a3b8;
+      line-height: 1.2;
+      font-weight: 700;
+    }
+    .a4-sheet ol,
+    .worksheet-measure-harness ol,
+    .worksheet-measure-container ol {
+      list-style: none;
+      margin: 0;
+      padding: 0 0 0 4px;
+    }
+    .a4-sheet li,
+    .worksheet-measure-harness li,
+    .worksheet-measure-container li {
+      margin-bottom: 8px;
+      font-size: 16px;
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+    .a4-sheet li > div:first-child,
+    .a4-sheet li.flex,
+    .worksheet-measure-harness li > div:first-child,
+    .worksheet-measure-harness li.flex,
+    .worksheet-measure-container li > div:first-child,
+    .worksheet-measure-container li.flex {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+    }
+    .a4-sheet li.justify-between,
+    .worksheet-measure-harness li.justify-between,
+    .worksheet-measure-container li.justify-between {
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .a4-sheet .flex-1,
+    .worksheet-measure-harness .flex-1,
+    .worksheet-measure-container .flex-1 {
+      flex: 1;
+    }
+    .a4-sheet .shrink-0,
+    .worksheet-measure-harness .shrink-0,
+    .worksheet-measure-container .shrink-0 {
+      flex-shrink: 0;
+    }
+    .a4-sheet .w-5,
+    .worksheet-measure-harness .w-5,
+    .worksheet-measure-container .w-5 {
+      width: 20px;
+      display: inline-block;
+    }
+    .a4-sheet .pl-7,
+    .worksheet-measure-harness .pl-7,
+    .worksheet-measure-container .pl-7 {
+      padding-left: 30px;
+    }
+    .a4-sheet .fill-blanks-item,
+    .a4-sheet li.fill-blanks-item,
+    .worksheet-measure-harness .fill-blanks-item,
+    .worksheet-measure-harness li.fill-blanks-item,
+    .worksheet-measure-container .fill-blanks-item,
+    .worksheet-measure-container li.fill-blanks-item {
+      line-height: 1.95;
+      margin-bottom: 12px !important;
+    }
+    .a4-sheet .fill-blanks-item span,
+    .worksheet-measure-harness .fill-blanks-item span,
+    .worksheet-measure-container .fill-blanks-item span {
+      line-height: 1.95;
+    }
+    .a4-sheet .leading-\\[2\\.6\\],
+    .worksheet-measure-harness .leading-\\[2\\.6\\],
+    .worksheet-measure-container .leading-\\[2\\.6\\] {
+      line-height: 1.95 !important;
+    }
+    .a4-sheet .mb-4,
+    .worksheet-measure-harness .mb-4,
+    .worksheet-measure-container .mb-4 {
+      margin-bottom: 16px !important;
+    }
+    .a4-sheet span[aria-label="blank writing space"],
+    .worksheet-measure-harness span[aria-label="blank writing space"],
+    .worksheet-measure-container span[aria-label="blank writing space"] {
+      display: inline-block;
+      min-width: 90px;
+      border-bottom: 1.5px solid #0f172a;
+      margin: 0 6px;
+      vertical-align: baseline;
+    }
+    .a4-sheet span[aria-label="Write True or False"],
+    .worksheet-measure-harness span[aria-label="Write True or False"],
+    .worksheet-measure-container span[aria-label="Write True or False"] {
+      display: inline-block;
+      width: 135px;
+      border-bottom: 1.5px solid #0f172a;
+      flex-shrink: 0;
+    }
+    .a4-sheet .h-\\[11mm\\],
+    .worksheet-measure-harness .h-\\[11mm\\],
+    .worksheet-measure-container .h-\\[11mm\\] {
+      height: 9.5mm;
+      border-bottom: 1px solid #64748b;
+      width: 100%;
+      margin-bottom: 10px;
+      padding-bottom: 8px;
+    }
+    .a4-sheet table,
+    .worksheet-measure-harness table,
+    .worksheet-measure-container table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 15.5px;
+    }
+    .a4-sheet th,
+    .a4-sheet td,
+    .worksheet-measure-harness th,
+    .worksheet-measure-harness td,
+    .worksheet-measure-container th,
+    .worksheet-measure-container td {
+      border: 1px solid #1e293b;
+      padding: 6px 10px;
+      text-align: left;
+    }
+    .a4-sheet thead tr,
+    .worksheet-measure-harness thead tr,
+    .worksheet-measure-container thead tr {
+      background: #f1f5f9;
+    }
+    .a4-sheet .grid-cols-2,
+    .worksheet-measure-harness .grid-cols-2,
+    .worksheet-measure-container .grid-cols-2 {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 6px 24px;
+      margin-top: 6px;
+      font-size: 15px;
+    }
+    .a4-sheet .grid-cols-2 > div,
+    .worksheet-measure-harness .grid-cols-2 > div,
+    .worksheet-measure-container .grid-cols-2 > div {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .a4-sheet .matching-col-header,
+    .worksheet-measure-harness .matching-col-header,
+    .worksheet-measure-container .matching-col-header {
+      border-bottom: 1.5px solid #1e293b !important;
+    }
+    .a4-sheet .border-r-0,
+    .worksheet-measure-harness .border-r-0,
+    .worksheet-measure-container .border-r-0 {
+      border-right: 0 !important;
+    }
+    .a4-sheet .border-l-0,
+    .worksheet-measure-harness .border-l-0,
+    .worksheet-measure-container .border-l-0 {
+      border-left: 0 !important;
+    }
+    .a4-sheet .border-t-0,
+    .worksheet-measure-harness .border-t-0,
+    .worksheet-measure-container .border-t-0 {
+      border-top: 0 !important;
+    }
+    .a4-sheet .rounded-l-none,
+    .worksheet-measure-harness .rounded-l-none,
+    .worksheet-measure-container .rounded-l-none {
+      border-radius: 0 !important;
+    }
+    .a4-sheet .rounded-r-none,
+    .worksheet-measure-harness .rounded-r-none,
+    .worksheet-measure-container .rounded-r-none {
+      border-radius: 0 !important;
+    }
+    .a4-sheet .rounded-full,
+    .worksheet-measure-harness .rounded-full,
+    .worksheet-measure-container .rounded-full {
+      display: inline-block;
+      width: 13px;
+      height: 13px;
+      border-radius: 9999px;
+      border: 1px solid #0f172a;
+      flex-shrink: 0;
+    }
+    .a4-sheet .ml-7,
+    .worksheet-measure-harness .ml-7,
+    .worksheet-measure-container .ml-7 {
+      margin-left: 30px;
+      margin-top: 6px;
+      border: 1px solid #94a3b8;
+      position: relative;
+    }
+    .a4-sheet .ml-7 span,
+    .worksheet-measure-harness .ml-7 span,
+    .worksheet-measure-container .ml-7 span {
+      position: absolute;
+      top: 4px;
+      right: 8px;
+      font-size: 10px;
+      text-transform: uppercase;
+      color: #94a3b8;
+    }
+    .a4-sheet .flex,
+    .worksheet-measure-harness .flex,
+    .worksheet-measure-container .flex {
+      display: flex;
+    }
+    .a4-sheet .flex-col,
+    .worksheet-measure-harness .flex-col,
+    .worksheet-measure-container .flex-col {
+      flex-direction: column;
+    }
+    .a4-sheet .items-baseline,
+    .worksheet-measure-harness .items-baseline,
+    .worksheet-measure-container .items-baseline {
+      align-items: baseline;
+    }
+    .a4-sheet .items-center,
+    .worksheet-measure-harness .items-center,
+    .worksheet-measure-container .items-center {
+      align-items: center;
+    }
+    .a4-sheet .gap-1\\.5,
+    .worksheet-measure-harness .gap-1\\.5,
+    .worksheet-measure-container .gap-1\\.5 {
+      gap: 6px;
+    }
+    .a4-sheet .gap-2,
+    .worksheet-measure-harness .gap-2,
+    .worksheet-measure-container .gap-2 {
+      gap: 8px;
+    }
+    .a4-sheet .gap-3,
+    .worksheet-measure-harness .gap-3,
+    .worksheet-measure-container .gap-3 {
+      gap: 12px;
+    }
+    .a4-sheet .pt-0\\.5,
+    .worksheet-measure-harness .pt-0\\.5,
+    .worksheet-measure-container .pt-0\\.5 {
+      padding-top: 2px;
+    }
+    .a4-sheet .text-sm,
+    .worksheet-measure-harness .text-sm,
+    .worksheet-measure-container .text-sm {
+      font-size: 15.5px;
+      line-height: 1.45;
+    }
+    .a4-sheet .text-xs,
+    .worksheet-measure-harness .text-xs,
+    .worksheet-measure-container .text-xs {
+      font-size: 12px;
+      line-height: 1.3333;
+    }
+    .a4-sheet .text-justify,
+    .worksheet-measure-harness .text-justify,
+    .worksheet-measure-container .text-justify {
+      text-align: justify;
+    }
+    .a4-sheet .text-slate-600,
+    .worksheet-measure-harness .text-slate-600,
+    .worksheet-measure-container .text-slate-600 {
+      color: #475569;
+    }
+    .a4-sheet .text-slate-800,
+    .worksheet-measure-harness .text-slate-800,
+    .worksheet-measure-container .text-slate-800 {
+      color: #1e293b;
+    }
+    .a4-sheet .mb-1,
+    .worksheet-measure-harness .mb-1,
+    .worksheet-measure-container .mb-1 {
+      margin-bottom: 4px;
+    }
+    .a4-sheet .mb-1\\.5,
+    .worksheet-measure-harness .mb-1\\.5,
+    .worksheet-measure-container .mb-1\\.5 {
+      margin-bottom: 6px;
+    }
+    .a4-sheet .mb-2,
+    .worksheet-measure-harness .mb-2,
+    .worksheet-measure-container .mb-2 {
+      margin-bottom: 8px;
+    }
+    .a4-sheet .p-2,
+    .worksheet-measure-harness .p-2,
+    .worksheet-measure-container .p-2 {
+      padding: 8px;
+    }
+    .a4-sheet .px-1,
+    .worksheet-measure-harness .px-1,
+    .worksheet-measure-container .px-1 {
+      padding-left: 4px;
+      padding-right: 4px;
+    }
+    .a4-sheet .mx-0\\.5,
+    .worksheet-measure-harness .mx-0\\.5,
+    .worksheet-measure-container .mx-0\\.5 {
+      margin-left: 2px;
+      margin-right: 2px;
+    }
+    .a4-sheet .mx-1,
+    .worksheet-measure-harness .mx-1,
+    .worksheet-measure-container .mx-1 {
+      margin-left: 4px;
+      margin-right: 4px;
+    }
+    .a4-sheet .rounded,
+    .worksheet-measure-harness .rounded,
+    .worksheet-measure-container .rounded {
+      border-radius: 4px;
+    }
+    .a4-sheet .border,
+    .worksheet-measure-harness .border,
+    .worksheet-measure-container .border {
+      border: 1px solid #d1d5db;
+    }
+    .a4-sheet .border-slate-300,
+    .worksheet-measure-harness .border-slate-300,
+    .worksheet-measure-container .border-slate-300 {
+      border-color: #cbd5e1;
+    }
+    .a4-sheet .border-2.border-slate-900.rounded,
+    .worksheet-measure-harness .border-2.border-slate-900.rounded,
+    .worksheet-measure-container .border-2.border-slate-900.rounded {
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      border-radius: 4px;
+      border: 2px solid #0f172a;
+    }
+    .a4-sheet .leading-\\[2\\.3\\],
+    .worksheet-measure-harness .leading-\\[2\\.3\\],
+    .worksheet-measure-container .leading-\\[2\\.3\\] {
+      line-height: 2.3;
+    }
+    .a4-sheet .leading-\\[2\\.65\\],
+    .worksheet-measure-harness .leading-\\[2\\.65\\],
+    .worksheet-measure-container .leading-\\[2\\.65\\] {
+      line-height: 2.65;
+    }
+    .a4-sheet span[style*="width"],
+    .worksheet-measure-harness span[style*="width"],
+    .worksheet-measure-container span[style*="width"] {
+      display: inline-block;
+    }
+    .a4-sheet .align-baseline,
+    .worksheet-measure-harness .align-baseline,
+    .worksheet-measure-container .align-baseline {
+      vertical-align: baseline;
+    }
+    .a4-sheet .inline-block.h-3\\.5.w-3\\.5.rounded-full.border.border-slate-900.shrink-0,
+    .worksheet-measure-harness .inline-block.h-3\\.5.w-3\\.5.rounded-full.border.border-slate-900.shrink-0,
+    .worksheet-measure-container .inline-block.h-3\\.5.w-3\\.5.rounded-full.border.border-slate-900.shrink-0 {
+      width: 13px;
+      height: 13px;
+      border: 1px solid #0f172a;
+    }
+    .a4-sheet .space-y-1 > * + *,
+    .worksheet-measure-harness .space-y-1 > * + *,
+    .worksheet-measure-container .space-y-1 > * + * {
+      margin-top: 4px;
+    }
+    .a4-sheet .space-y-2 > * + *,
+    .worksheet-measure-harness .space-y-2 > * + *,
+    .worksheet-measure-container .space-y-2 > * + * {
+      margin-top: 8px;
+    }
+    .a4-sheet .space-y-3 > * + *,
+    .worksheet-measure-harness .space-y-3 > * + *,
+    .worksheet-measure-container .space-y-3 > * + * {
+      margin-top: 12px;
+    }
+    .a4-sheet .space-y-4 > * + *,
+    .worksheet-measure-harness .space-y-4 > * + *,
+    .worksheet-measure-container .space-y-4 > * + * {
+      margin-top: 16px;
+    }
+    .a4-sheet .text-right,
+    .worksheet-measure-harness .text-right,
+    .worksheet-measure-container .text-right {
+      position: absolute;
+      bottom: 1.5mm;
+      left: 12mm;
+      right: 4mm;
+      text-align: right;
+      font-size: 11px;
+      color: #64748b;
+      line-height: 1;
+    }
+    .a4-sheet.answer-key-page,
+    .worksheet-measure-harness .answer-key-page,
+    .worksheet-measure-container .answer-key-page {
+      width: 198mm;
+      padding: 5mm 4mm 3mm 12mm;
+      margin: 0 auto;
+      page-break-before: always;
+      break-before: page;
+    }
+    .a4-sheet.answer-key-page > div:first-child,
+    .worksheet-measure-harness .answer-key-page > div:first-child,
+    .worksheet-measure-container .answer-key-page > div:first-child {
+      border-bottom: 2px solid #0f172a;
+      padding-bottom: 8px;
+      margin-bottom: 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .a4-sheet.answer-key-page ul,
+    .worksheet-measure-harness .answer-key-page ul,
+    .worksheet-measure-container .answer-key-page ul {
+      padding-left: 20px;
+      margin: 6px 0 12px 0;
+      font-size: 13.5px;
+    }
+    .a4-sheet.answer-key-page li,
+    .worksheet-measure-harness .answer-key-page li,
+    .worksheet-measure-container .answer-key-page li {
+      font-size: 13.5px;
+      margin-bottom: 4px;
+      display: list-item;
+      list-style-type: disc;
+    }
+    .worksheet-measure-container,
+    .worksheet-measure-harness {
+      position: fixed;
+      left: -99999px;
+      top: 0;
+      width: 182mm;
+      visibility: hidden;
+      pointer-events: none;
+      box-sizing: border-box;
+    }
+  `;
+}
+
 /**
  * WafiWorksheetBuilder Component
  * 
@@ -314,6 +1101,7 @@ function paginateWorksheet(worksheet) {
  * - onSaveToFirestore: async function to save worksheet to Firestore
  * - onDeleteFromFirestore: async function to delete worksheet from Firestore
  * - onSaveActiveLocally: function to save active worksheet to localStorage
+ * - showHeader: boolean - whether Page 1 header box is shown (default: true)
  */
 export function WafiWorksheetBuilder({
   isAdmin = true,
@@ -324,6 +1112,7 @@ export function WafiWorksheetBuilder({
   onSaveToFirestore = null,
   onDeleteFromFirestore = null,
   onSaveActiveLocally = null,
+  showHeader = true,
   ...otherProps
 } = {}) {
   // Active worksheet state (persisted locally for 100% offline use)
@@ -417,6 +1206,15 @@ export function WafiWorksheetBuilder({
   const importFileRef = useRef(null);
   const backupFileInputRef = useRef(null);
   const printAreaRef = useRef(null);
+  const measureContainerRef = useRef(null);
+  const answerKeySheetRef = useRef(null);
+
+  const fontStack =
+    paperFontStyle === 'serif'
+      ? "'Crimson Pro', 'Hind Siliguri', Georgia, 'Times New Roman', serif"
+      : "'Plus Jakarta Sans', 'Hind Siliguri', Arial, sans-serif";
+
+  const resolvedShowHeader = showHeader ?? (worksheet?.showHeader !== false);
 
   // Identify whether active worksheet matches a saved entry
   const activeSavedSheet = useMemo(
@@ -546,322 +1344,8 @@ export function WafiWorksheetBuilder({
       'https://fonts.googleapis.com/css2?family=Crimson+Pro:ital,wght@0,400;0,600;0,700;1,400&family=Hind+Siliguri:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap';
     doc.head.appendChild(fontLink);
 
-    const fontStack =
-      paperFontStyle === 'serif'
-        ? "'Crimson Pro', 'Hind Siliguri', Georgia, serif"
-        : "'Plus Jakarta Sans', 'Hind Siliguri', sans-serif";
-
     const styleEl = doc.createElement('style');
-    styleEl.textContent = `
-      @page { size: A4 portrait; margin: 6mm 6mm 4mm 6mm; }
-      * { box-sizing: border-box; }
-      body {
-        margin: 0;
-        padding: 0;
-        background: #ffffff;
-        color: #020617;
-        font-family: ${fontStack};
-        -webkit-print-color-adjust: exact;
-        print-color-adjust: exact;
-      }
-      h1, h2, h3, h4, h5, h6, p {
-        margin: 0;
-        padding: 0;
-      }
-      .a4-sheet {
-        width: 198mm;
-        height: 286.5mm;
-        min-height: 286.5mm;
-        position: relative;
-        padding: 5mm 4mm 1.5mm 12mm;
-        margin: 0 auto;
-        background: #ffffff;
-        display: flex;
-        flex-direction: column;
-        justify-content: space-between;
-        page-break-after: always;
-        break-after: page;
-      }
-      .a4-sheet:last-child {
-        page-break-after: auto;
-        break-after: auto;
-      }
-      .a4-sheet > div:first-child > .border-2 {
-        border: 2px solid #0f172a;
-        padding: 14px 16px;
-        margin-bottom: 18px;
-      }
-      .text-center { text-align: center; }
-      .border-b.border-slate-400 {
-        border-bottom: 1px solid #94a3b8;
-        padding-bottom: 8px;
-        margin-bottom: 10px;
-      }
-      .sheet-header-title {
-        margin: 0;
-        font-size: 10.5pt;
-        font-weight: 600;
-        letter-spacing: 0.15em;
-        text-transform: uppercase;
-        color: #475569;
-        text-align: center;
-        line-height: 1.25;
-      }
-      .sheet-header-chapter {
-        margin: 3px 0 0 0;
-        font-size: 17.5pt;
-        font-weight: 700;
-        letter-spacing: 0.01em;
-        color: #0f172a;
-        text-align: center;
-        line-height: 1.25;
-      }
-      h2 { font-size: 18px; font-weight: 700; }
-      h3 { font-size: 15px; font-weight: 700; }
-      h4 { font-size: 16px; font-weight: 700; }
-      .grid-cols-3 {
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 16px;
-        font-size: 15.5px;
-      }
-      .grid-cols-3 > div { display: flex; align-items: baseline; gap: 6px; }
-      .font-bold { font-weight: 700; }
-      .font-semibold { font-weight: 600; }
-      .font-medium { font-weight: 500; }
-      .italic { font-style: italic; }
-      .border-dotted {
-        flex: 1;
-        border-bottom: 1px dotted #475569;
-        padding: 0 4px;
-      }
-      .border-dotted.font-bold {
-        font-weight: 700;
-      }
-      section { margin-bottom: 18px; }
-      section > .border-b {
-        border-bottom: none !important;
-        margin-bottom: 8px;
-        padding-bottom: 0;
-      }
-      section > .border-b h4 {
-        font-size: 16px;
-        margin: 0;
-        padding: 0;
-        padding-bottom: 3px;
-        border-bottom: 1px solid #94a3b8;
-        line-height: 1.2;
-      }
-      ol { list-style: none; margin: 0; padding: 0 0 0 4px; }
-      li {
-        margin-bottom: 8px;
-        font-size: 16px;
-        break-inside: avoid;
-        page-break-inside: avoid;
-      }
-      li > div:first-child, li.flex {
-        display: flex;
-        align-items: baseline;
-        gap: 10px;
-      }
-      li.justify-between { justify-content: space-between; gap: 16px; }
-      .flex-1 { flex: 1; }
-      .shrink-0 { flex-shrink: 0; }
-      .w-5 { width: 20px; display: inline-block; }
-      .pl-7 { padding-left: 30px; }
-      .fill-blanks-item,
-      li.fill-blanks-item {
-        line-height: 1.95;
-        margin-bottom: 12px !important;
-      }
-      .fill-blanks-item span {
-        line-height: 1.95;
-      }
-      .leading-\[2\.6\] {
-        line-height: 1.95 !important;
-      }
-      .mb-4 {
-        margin-bottom: 16px !important;
-      }
-      span[aria-label="blank writing space"] {
-        display: inline-block;
-        min-width: 90px;
-        border-bottom: 1.5px solid #0f172a;
-        margin: 0 6px;
-        vertical-align: baseline;
-      }
-      span[aria-label="Write True or False"] {
-        display: inline-block;
-        width: 135px;
-        border-bottom: 1.5px solid #0f172a;
-        flex-shrink: 0;
-      }
-      .h-\\[11mm\\] {
-        height: 9.5mm;
-        border-bottom: 1px solid #64748b;
-        width: 100%;
-      }
-      table {
-        width: 100%;
-        border-collapse: collapse;
-        font-size: 15.5px;
-      }
-      th, td {
-        border: 1px solid #1e293b;
-        padding: 6px 10px;
-        text-align: left;
-      }
-      thead tr { background: #f1f5f9; }
-      .grid-cols-2 {
-        display: grid;
-        grid-template-columns: repeat(2, 1fr);
-        gap: 6px 24px;
-        margin-top: 6px;
-        font-size: 15px;
-      }
-      .grid-cols-2 > div { display: flex; align-items: center; gap: 8px; }
-      
-      /* === MATCHING SECTION CSS (Inline styles used instead) === */
-      .matching-col-header { border-bottom: 1.5px solid #1e293b !important; }
-      
-      .border-r-0 { border-right: 0 !important; }
-      .border-l-0 { border-left: 0 !important; }
-      .border-t-0 { border-top: 0 !important; }
-      .rounded-l-none { border-radius: 0 !important; }
-      .rounded-r-none { border-radius: 0 !important; }
-      
-      .rounded-full {
-        display: inline-block;
-        width: 13px;
-        height: 13px;
-        border-radius: 9999px;
-        border: 1px solid #0f172a;
-        flex-shrink: 0;
-      }
-      .ml-7 {
-        margin-left: 30px;
-        margin-top: 6px;
-        border: 1px solid #94a3b8;
-        position: relative;
-      }
-      .ml-7 span {
-        position: absolute;
-        top: 4px;
-        right: 8px;
-        font-size: 10px;
-        text-transform: uppercase;
-        color: #94a3b8;
-      }
-      
-      /* === FLEX UTILITIES === */
-      .flex {
-        display: flex;
-      }
-      .flex-col {
-        flex-direction: column;
-      }
-      .flex-1 {
-        flex: 1;
-      }
-      .items-baseline {
-        align-items: baseline;
-      }
-      .items-center {
-        align-items: center;
-      }
-      .gap-1\.5 {
-        gap: 6px;
-      }
-      .gap-2 {
-        gap: 8px;
-      }
-      .gap-3 {
-        gap: 12px;
-      }
-      .pt-0\.5 {
-        padding-top: 2px;
-      }
-      
-      /* === TEXT UTILITIES === */
-      .text-sm { font-size: 15.5px; line-height: 1.45; }
-      .text-xs { font-size: 12px; line-height: 1.3333; }
-      .text-justify { text-align: justify; }
-      .text-slate-600 { color: #475569; }
-      .text-slate-800 { color: #1e293b; }
-      
-      /* === LAYOUT & SPACING === */
-      .mb-1 { margin-bottom: 4px; }
-      .mb-1\.5 { margin-bottom: 6px; }
-      .mb-2 { margin-bottom: 8px; }
-      .mb-4 { margin-bottom: 16px; }
-      .p-2 { padding: 8px; }
-      .px-1 { padding-left: 4px; padding-right: 4px; }
-      .mx-0\.5 { margin-left: 2px; margin-right: 2px; }
-      .mx-1 { margin-left: 4px; margin-right: 4px; }
-      
-      /* === BORDER & ROUNDED === */
-      .rounded { border-radius: 4px; }
-      .border { border: 1px solid #d1d5db; }
-      .border-slate-300 { border-color: #cbd5e1; }
-      .border-slate-400 { border-color: #94a3b8; }
-      .border-2.border-slate-900.rounded { 
-        display: inline-block;
-        width: 16px;
-        height: 16px;
-        border-radius: 4px;
-        border: 2px solid #0f172a;
-      }
-      
-      /* === LEAD/LINE HEIGHT === */
-      .leading-\[2\.3\] { line-height: 2.3; }
-      .leading-\[2\.65\] { line-height: 2.65; }
-      
-
-      /* === INLINE STYLES === */
-      span[style*="width"] {
-        display: inline-block;
-      }
-      
-      /* === ALIGN BASELINE === */
-      .align-baseline { vertical-align: baseline; }
-      
-      /* === TICK SENTENCE CHECKBOX STYLING === */
-      .inline-block.h-3\\.5.w-3\\.5.rounded-full.border.border-slate-900.shrink-0 {
-        width: 13px;
-        height: 13px;
-        border: 1px solid #0f172a;
-      }
-      
-      /* Space-y utility */
-      .space-y-1 > * + * { margin-top: 4px; }
-      .space-y-2 > * + * { margin-top: 8px; }
-      .space-y-3 > * + * { margin-top: 12px; }
-      .space-y-4 > * + * { margin-top: 16px; }
-
-      .text-right {
-        text-align: right;
-        font-size: 11px;
-        color: #64748b;
-        padding-top: 8px;
-      }
-      .answer-key-page {
-        width: 198mm;
-        padding: 5mm 4mm 3mm 12mm;
-        margin: 0 auto;
-        page-break-before: always;
-        break-before: page;
-      }
-      .answer-key-page > div:first-child {
-        border-bottom: 2px solid #0f172a;
-        padding-bottom: 8px;
-        margin-bottom: 14px;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-      }
-      .answer-key-page ul { padding-left: 20px; margin: 6px 0 12px 0; font-size: 13.5px; }
-      .answer-key-page li { font-size: 13.5px; margin-bottom: 4px; display: list-item; list-style-type: disc; }
-    `;
+    styleEl.textContent = getWorksheetPrintCss(fontStack, { standalone: true });
     doc.head.appendChild(styleEl);
 
     const clonedNode = doc.importNode(printContainer, true);
@@ -1580,7 +2064,12 @@ export function WafiWorksheetBuilder({
           if (section.items && section.items.length > 0) {
             ctx.font = `400 3.8px ${fontStack}`;
             section.items.forEach((item, idx) => {
-              const ans = item.answer || '(no answer)';
+              const ans =
+                section.type === 'matching'
+                  ? `${item.left} → ${item.right}`
+                  : section.type === 'word_meaning'
+                  ? `${item.word}: ${item.meaning || item.answer || 'N/A'}`
+                  : item.answer || '(no answer)';
               const numStr = `${idx + 1}. `;
               ctx.fillStyle = '#020617';
               ctx.fillText(numStr, 26, y);
@@ -1624,8 +2113,39 @@ export function WafiWorksheetBuilder({
     }
   };
 
-  // --- Paginate on worksheet change ---
-  const paginatedPages = useMemo(() => paginateWorksheet(worksheet), [worksheet]);
+  // --- Measured pagination state with instant SSR fallback ---
+  const [paginatedPages, setPaginatedPages] = useState(() => paginateWorksheet(worksheet));
+
+  useIsomorphicLayoutEffect(() => {
+    let isMounted = true;
+
+    const runMeasurement = () => {
+      if (!measureContainerRef.current) return;
+      try {
+        const measured = measureAndPaginate(measureContainerRef.current, worksheet, resolvedShowHeader);
+        if (isMounted && measured && measured.length > 0) {
+          setPaginatedPages(measured);
+        }
+      } catch (err) {
+        console.warn('DOM measurement error, falling back to heuristic:', err);
+        if (isMounted) {
+          setPaginatedPages(paginateWorksheet(worksheet));
+        }
+      }
+    };
+
+    if (typeof document !== 'undefined' && document.fonts && document.fonts.ready) {
+      document.fonts.ready.then(() => {
+        if (isMounted) runMeasurement();
+      });
+    } else {
+      runMeasurement();
+    }
+
+    return () => {
+      isMounted = false;
+    };
+  }, [worksheet, paperFontStyle, resolvedShowHeader]);
 
   // --- Update a section ---
   const updateSection = (sectionId, updates) => {
@@ -2023,11 +2543,6 @@ export function WafiWorksheetBuilder({
     reader.readAsText(file);
   };
 
-  const fontStack =
-    paperFontStyle === 'serif'
-      ? "'Crimson Pro', 'Hind Siliguri', Georgia, serif"
-      : "'Plus Jakarta Sans', 'Hind Siliguri', Arial, sans-serif";
-
   // --- Main Render ---
   return (
     <div className="flex h-screen flex-col bg-gradient-to-br from-slate-50 to-slate-100 font-sans">
@@ -2105,7 +2620,16 @@ export function WafiWorksheetBuilder({
               Header
             </button>
             <button
-              onClick={() => setShowAnswerKey(!showAnswerKey)}
+              onClick={() => {
+                const nextShowAnswerKey = !showAnswerKey;
+                setShowAnswerKey(nextShowAnswerKey);
+                if (nextShowAnswerKey) {
+                  setMobileView('preview');
+                  requestAnimationFrame(() => {
+                    answerKeySheetRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                  });
+                }
+              }}
               className={`flex items-center gap-1.5 rounded-lg border px-2.5 sm:px-3 py-2 text-xs sm:text-sm font-medium transition-colors ${
                 showAnswerKey
                   ? 'border-amber-500 bg-amber-50 text-amber-800'
@@ -2980,12 +3504,425 @@ export function WafiWorksheetBuilder({
               </button>
             </div>
 
+            {/* Exact Print & Preview Stylesheet */}
+            <style dangerouslySetInnerHTML={{ __html: getWorksheetPrintCss(fontStack) }} />
+
+            {/* Off-Screen 182mm Measurement Harness */}
+            <div
+              ref={measureContainerRef}
+              style={{
+                position: 'fixed',
+                left: '-99999px',
+                top: 0,
+                width: '182mm',
+                visibility: 'hidden',
+                pointerEvents: 'none',
+                fontFamily: fontStack,
+                boxSizing: 'border-box'
+              }}
+              className="worksheet-measure-container worksheet-measure-harness"
+              aria-hidden="true"
+            >
+              {resolvedShowHeader && (
+                <div data-measure-role="header" className="border-2 border-slate-900 p-4 mb-4">
+                  <p className="sheet-header-title text-center text-xs sm:text-sm uppercase tracking-widest font-semibold text-slate-600">
+                    {worksheet.header?.title}
+                  </p>
+                  <h2 className="sheet-header-chapter text-center text-xl sm:text-2xl font-bold text-slate-900 mt-1">
+                    {worksheet.header?.chapter}
+                  </h2>
+                  <div className="my-2 border-b border-slate-400"></div>
+                  <div className="grid grid-cols-3 gap-4 text-xs">
+                    <div className="flex items-baseline gap-2">
+                      <span className="font-bold">Name:</span>
+                      <span className="border-dotted flex-1 border-b border-slate-500">
+                        {worksheet.header?.studentName ? ` ${worksheet.header.studentName}` : ''}
+                      </span>
+                    </div>
+                    <div className="flex items-baseline gap-2">
+                      <span className="font-bold">Class:</span>
+                      <span className="border-dotted flex-1 border-b border-slate-500">
+                        {worksheet.header?.grade ? ` ${worksheet.header.grade}` : ''}
+                      </span>
+                    </div>
+                    <div className="flex items-baseline gap-2">
+                      <span className="font-bold">Subject:</span>
+                      <span className="border-dotted flex-1 border-b border-slate-500 font-bold">
+                        {worksheet.header?.subject ? ` ${worksheet.header.subject}` : ''}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {(worksheet.sections || []).map((section, secIdx) => (
+                <section key={section.id || secIdx} className="mb-5">
+                  {/* Normal Section Header */}
+                  <div data-measure-section-header={secIdx} className="border-b border-slate-400">
+                    <h4 className="text-base font-bold">
+                      {section.title}
+                    </h4>
+                  </div>
+
+                  {/* Continuation Section Header */}
+                  <div data-measure-section-cont-header={secIdx} className="border-b border-slate-400">
+                    <h4 className="text-base font-bold">
+                      {section.title}
+                      <span className="text-xs italic font-normal text-slate-500"> (continued)</span>
+                    </h4>
+                  </div>
+
+                  {/* 1. Fill in the Blanks */}
+                  {section.type === 'fill_blanks' && (
+                    <ol className="fill-blanks-list text-[16px]">
+                      {(section.items || []).map((item, idx) => {
+                        const hasBlanks = /_+/.test(item.prompt || '');
+                        return (
+                          <li
+                            key={item.id || idx}
+                            data-measure-item={`${secIdx}-${idx}`}
+                            className="fill-blanks-item flex items-baseline gap-3 mb-4 leading-[2.6]"
+                          >
+                            <span className="font-bold shrink-0">{idx + 1}.</span>
+                            {hasBlanks ? (
+                              <span className="leading-[2.6]">
+                                {(item.prompt || '').split(/(_+)/g).map((part, pIdx) =>
+                                  /^_+$/.test(part) ? (
+                                    <span
+                                      key={pIdx}
+                                      aria-label="blank writing space"
+                                      style={{
+                                        width: `${Math.max(90, part.length * 14)}px`,
+                                        maxWidth: '100%'
+                                      }}
+                                      className="inline-block border-b-2 border-slate-900 mx-1 align-baseline"
+                                    />
+                                  ) : (
+                                    <span key={pIdx}>{part}</span>
+                                  )
+                                )}
+                              </span>
+                            ) : (
+                              <span className="leading-[2.6]">{item.prompt}</span>
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ol>
+                  )}
+
+                  {/* 2. True / False */}
+                  {section.type === 'true_false' && (
+                    <ol className="space-y-4 text-[16px]">
+                      {(section.items || []).map((item, idx) => (
+                        <li
+                          key={item.id || idx}
+                          data-measure-item={`${secIdx}-${idx}`}
+                          className="flex items-baseline justify-between gap-3"
+                        >
+                          <div className="flex items-baseline gap-3">
+                            <span className="font-bold">{idx + 1}.</span>
+                            <span>{item.prompt}</span>
+                          </div>
+                          <span
+                            aria-label="Write True or False"
+                            className="inline-block border-b-2 border-slate-900 w-24 shrink-0"
+                          />
+                        </li>
+                      ))}
+                    </ol>
+                  )}
+
+                  {/* 3. Match Column A & B */}
+                  {section.type === 'matching' && (
+                    <div
+                      data-measure-atomic={secIdx}
+                      className="text-[15.5px]"
+                      style={{ display: 'grid', gridTemplateColumns: '1fr 20px 1fr', gap: '20px', marginTop: '8px' }}
+                    >
+                      <div style={{ border: '1.5px solid #1e293b', borderRadius: '4px', overflow: 'hidden' }}>
+                        <div className="matching-col-header" style={{ borderBottom: '1.5px solid #1e293b', background: '#f1f5f9', fontWeight: 700, textAlign: 'center', padding: '7px 10px' }}>
+                          Column A
+                        </div>
+                        <div>
+                          {(section.items || []).map((item, itemIdx) => (
+                            <div
+                              key={item.id || itemIdx}
+                              style={{
+                                background: '#ffffff',
+                                textAlign: 'center',
+                                padding: '7px 10px',
+                                borderTop: itemIdx === 0 ? '1.5px solid #1e293b' : 'none',
+                                borderBottom: itemIdx < section.items.length - 1 ? '1px solid #64748b' : 'none'
+                              }}
+                            >
+                              {item.left}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      <div></div>
+                      <div style={{ border: '1.5px solid #1e293b', borderRadius: '4px', overflow: 'hidden' }}>
+                        <div className="matching-col-header" style={{ borderBottom: '1.5px solid #1e293b', background: '#f1f5f9', fontWeight: 700, textAlign: 'center', padding: '7px 10px' }}>
+                          Column B
+                        </div>
+                        <div>
+                          {(section.items || []).map((item, itemIdx) => (
+                            <div
+                              key={item.id || itemIdx}
+                              style={{
+                                background: '#ffffff',
+                                textAlign: 'center',
+                                padding: '7px 10px',
+                                borderTop: itemIdx === 0 ? '1.5px solid #1e293b' : 'none',
+                                borderBottom: itemIdx < section.items.length - 1 ? '1px solid #64748b' : 'none'
+                              }}
+                            >
+                              {item.right}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 4. Word Meanings / Sentences */}
+                  {section.type === 'word_meaning' && (
+                    <div data-measure-atomic={secIdx} className="text-[15.5px]">
+                      <div className="grid grid-cols-3 gap-2 mb-2 bg-slate-100 p-2 font-bold rounded">
+                        <div>Word</div>
+                        <div>Meaning</div>
+                        <div>Make Sentence</div>
+                      </div>
+                      <div className="space-y-1">
+                        {(section.items || []).map((item, idx) => (
+                          <div key={item.id || idx} className="grid grid-cols-3 gap-2 border border-slate-300 p-2 rounded">
+                            <div className="font-semibold">{idx + 1}. {item.word}</div>
+                            <div className="text-slate-600">{item.meaning}</div>
+                            <div className="border-b border-dotted border-slate-400"></div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 5. Short / Broad Q&A */}
+                  {section.type === 'short_qa' && (
+                    <ol className="space-y-3 text-[16px]">
+                      {(section.items || []).map((item, idx) => (
+                        <li key={item.id || idx} data-measure-item={`${secIdx}-${idx}`}>
+                          <div className="flex items-baseline gap-3 mb-2">
+                            <span className="font-bold">{idx + 1}.</span>
+                            <span>{item.prompt}</span>
+                          </div>
+                          {Array.from({ length: item.lines || 3 }).map((_, lIdx) => (
+                            <div key={lIdx} className="h-[11mm] border-b border-slate-400 mb-1"></div>
+                          ))}
+                        </li>
+                      ))}
+                    </ol>
+                  )}
+
+                  {/* 6. Multiple Choice (MCQ) */}
+                  {section.type === 'mcq' && (
+                    <ol className="space-y-3 text-[16px]">
+                      {(section.items || []).map((item, idx) => (
+                        <li key={item.id || idx} data-measure-item={`${secIdx}-${idx}`}>
+                          <div className="flex items-baseline gap-3 mb-1.5">
+                            <span className="font-bold">{idx + 1}.</span>
+                            <span>{item.prompt}</span>
+                          </div>
+                          <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 pl-6">
+                            {(item.options || []).map((opt, oIdx) => (
+                              <div key={oIdx} className="flex items-center gap-2">
+                                <span className="inline-block h-3.5 w-3.5 rounded-full border border-slate-900 shrink-0"></span>
+                                <span>({String.fromCharCode(97 + oIdx)}) {opt}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </li>
+                      ))}
+                    </ol>
+                  )}
+
+                  {/* 7. Math / Work Box */}
+                  {section.type === 'math_box' && (
+                    <ol className="space-y-3 text-[16px]">
+                      {(section.items || []).map((item, idx) => (
+                        <li key={item.id || idx} data-measure-item={`${secIdx}-${idx}`}>
+                          <div className="flex items-baseline gap-3 mb-2">
+                            <span className="font-bold">{idx + 1}.</span>
+                            <span>{item.prompt}</span>
+                          </div>
+                          <div
+                            style={{ height: `${item.boxHeight || 26}mm` }}
+                            className="relative ml-7 border border-slate-400 rounded p-2"
+                          >
+                            <span className="absolute right-2 top-1 text-[10px] uppercase text-slate-400">
+                              Work / Answer
+                            </span>
+                          </div>
+                        </li>
+                      ))}
+                    </ol>
+                  )}
+
+                  {/* 8. Passage / Cloze */}
+                  {section.type === 'passage_cloze' && (
+                    <div className="text-[15.5px]">
+                      {(section.items || []).map((item, idx) => {
+                        const hasBrackets = /\(\s*[^/]+\s*\/\s*[^)]+\s*\)/g.test(item.passage || '');
+                        const hasBlanks = /_+/.test(item.passage || '');
+                        return (
+                          <div
+                            key={item.id || idx}
+                            data-measure-item={`${secIdx}-${idx}`}
+                            className="mb-4 text-justify leading-[2.65] text-slate-800"
+                          >
+                            {hasBrackets ? (
+                              <span>
+                                {(item.passage || '').split(/(\(\s*[^/]+\s*\/\s*[^)]+\s*\))/g).map((part, pIdx) => {
+                                  if (/^\(\s*[^/]+\s*\/\s*[^)]+\s*\)$/.test(part)) {
+                                    const options = part
+                                      .slice(1, -1)
+                                      .split('/')
+                                      .map((s) => s.trim());
+                                    return (
+                                      <span key={pIdx} className="font-semibold">
+                                        {`( ${options.join(' / ')} )`}
+                                      </span>
+                                    );
+                                  }
+                                  return <span key={pIdx}>{part}</span>;
+                                })}
+                              </span>
+                            ) : hasBlanks ? (
+                              <span>
+                                {(item.passage || '').split(/(_+)/g).map((part, pIdx) =>
+                                  /^_+$/.test(part) ? (
+                                    <span
+                                      key={pIdx}
+                                      aria-label="blank writing space"
+                                      style={{
+                                        width: `${Math.max(60, part.length * 12)}px`,
+                                        maxWidth: '100%'
+                                      }}
+                                      className="inline-block border-b-2 border-slate-900 mx-1 align-baseline"
+                                    />
+                                  ) : (
+                                    <span key={pIdx}>{part}</span>
+                                  )
+                                )}
+                              </span>
+                            ) : (
+                              <span>{item.passage}</span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* 9. Tick Correct Sentence */}
+                  {section.type === 'tick_sentence' && (
+                    <ol className="text-[16px]" style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+                      {(section.items || []).map((item, idx) => (
+                        <li
+                          key={item.id || idx}
+                          data-measure-item={`${secIdx}-${idx}`}
+                          className="mb-6"
+                          style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}
+                        >
+                          <span
+                            className="font-bold"
+                            style={{
+                              minWidth: '20px',
+                              lineHeight: '1.35',
+                              fontWeight: 700,
+                              color: '#020617'
+                            }}
+                          >
+                            {idx + 1}.
+                          </span>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', flex: 1 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <div
+                                style={{
+                                  width: '15px',
+                                  height: '15px',
+                                  border: '1.5px solid #0f172a',
+                                  borderRadius: '2px',
+                                  flexShrink: 0
+                                }}
+                              />
+                              <span
+                                className="font-bold"
+                                style={{
+                                  fontWeight: 700,
+                                  color: '#020617',
+                                  flexShrink: 0
+                                }}
+                              >
+                                A
+                              </span>
+                              <span
+                                className="text-slate-800"
+                                style={{
+                                  color: '#1e293b',
+                                  lineHeight: '1.35'
+                                }}
+                              >
+                                {item.sentenceA}
+                              </span>
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <div
+                                style={{
+                                  width: '15px',
+                                  height: '15px',
+                                  border: '1.5px solid #0f172a',
+                                  borderRadius: '2px',
+                                  flexShrink: 0
+                                }}
+                              />
+                              <span
+                                className="font-bold"
+                                style={{
+                                  fontWeight: 700,
+                                  color: '#020617',
+                                  flexShrink: 0
+                                }}
+                              >
+                                B
+                              </span>
+                              <span
+                                className="text-slate-800"
+                                style={{
+                                  color: '#1e293b',
+                                  lineHeight: '1.35'
+                                }}
+                              >
+                                {item.sentenceB}
+                              </span>
+                            </div>
+                          </div>
+                        </li>
+                      ))}
+                    </ol>
+                  )}
+
+                  {/* Section gap marker */}
+                  <div data-measure-section-gap={secIdx} style={{ height: '18px', margin: 0, padding: 0 }} />
+                </section>
+              ))}
+            </div>
+
             {/* Print Area */}
             <div ref={printAreaRef} style={{ fontFamily: fontStack }} className="space-y-6">
               {paginatedPages.map((page) => (
-                <div key={page.pageNumber} className="a4-sheet break-inside-avoid rounded-lg bg-white p-6 shadow-lg">
-                  <div>
-                    {page.pageNumber === 1 && (
+                <div key={page.pageNumber} className="a4-sheet break-inside-avoid rounded-lg bg-white p-6 shadow-lg relative">
+                  <div style={{ overflow: 'hidden' }}>
+                    {page.pageNumber === 1 && resolvedShowHeader && (
                       <div className="border-2 border-slate-900 p-4 mb-4">
                         <p className="sheet-header-title text-center text-xs sm:text-sm uppercase tracking-widest font-semibold text-slate-600">
                           {worksheet.header.title}
@@ -3378,7 +4315,17 @@ export function WafiWorksheetBuilder({
                   </div>
 
                   {paginatedPages.length > 1 && (
-                    <div className="text-right text-xs text-slate-500" style={{ flexShrink: 0, width: '100%', textAlign: 'right', paddingTop: '4px', lineHeight: 1 }}>
+                    <div
+                      className="text-right text-xs text-slate-500"
+                      style={{
+                        position: 'absolute',
+                        bottom: '1.5mm',
+                        left: '12mm',
+                        right: '4mm',
+                        textAlign: 'right',
+                        lineHeight: 1
+                      }}
+                    >
                       Page {page.pageNumber} of {paginatedPages.length}
                     </div>
                   )}
@@ -3387,33 +4334,42 @@ export function WafiWorksheetBuilder({
 
               {/* ANSWER KEY IN PREVIEW (If Enabled) */}
               {showAnswerKey && (
-                <div className="a4-sheet answer-key-page break-before-page rounded-lg bg-white p-6 shadow-lg">
-                  <div className="border-b-2 border-slate-900 pb-2 mb-4 flex justify-between items-center">
-                    <div>
-                      <h2 className="text-lg font-bold uppercase tracking-wide">Answer Key</h2>
-                      <p className="text-xs text-slate-600">{worksheet.header.chapter || 'Chapter'}</p>
-                    </div>
-                    <span className="text-xs font-semibold px-2 py-1 bg-amber-100 text-amber-800 rounded">
-                      Teacher / Parent Reference
-                    </span>
-                  </div>
-                  <div className="space-y-4">
-                    {worksheet.sections.map((section) => (
-                      <div key={section.id}>
-                        <h4 className="text-sm font-bold border-b border-slate-300 pb-1 mb-2">{section.title}</h4>
-                        <ol className="list-decimal pl-5 space-y-1 text-xs">
-                          {section.items.map((item, idx) => (
-                            <li key={item.id} className="text-slate-800">
-                              <span className="font-semibold text-slate-900">
-                                {section.type === 'tick_sentence'
-                                  ? `${item.answer || 'N/A'}`
-                                  : item.answer || '(No answer provided)'}
-                              </span>
-                            </li>
-                          ))}
-                        </ol>
+                <div
+                  ref={answerKeySheetRef}
+                  className="a4-sheet answer-key-page break-before-page rounded-lg bg-white p-6 shadow-lg"
+                >
+                  <div style={{ overflow: 'hidden', display: 'block', borderBottom: 'none' }}>
+                    <div className="border-b-2 border-slate-900 pb-2 mb-4 flex justify-between items-center">
+                      <div>
+                        <h2 className="text-lg font-bold uppercase tracking-wide">Answer Key</h2>
+                        <p className="text-xs text-slate-600">{worksheet.header.chapter || 'Chapter'}</p>
                       </div>
-                    ))}
+                      <span className="text-xs font-semibold px-2 py-1 bg-amber-100 text-amber-800 rounded">
+                        Teacher / Parent Reference
+                      </span>
+                    </div>
+                    <div className="space-y-4">
+                      {worksheet.sections.map((section) => (
+                        <div key={section.id}>
+                          <h4 className="text-sm font-bold border-b border-slate-300 pb-1 mb-2">{section.title}</h4>
+                          <ol className="list-decimal pl-5 space-y-1 text-xs">
+                            {section.items.map((item, idx) => (
+                              <li key={item.id} className="text-slate-800">
+                                <span className="font-semibold text-slate-900">
+                                  {section.type === 'matching'
+                                    ? (item.answer && String(item.answer).trim() ? item.answer : `${item.left} → ${item.right}`)
+                                    : section.type === 'word_meaning'
+                                    ? `${item.word}: ${item.meaning || item.answer || 'N/A'}`
+                                    : section.type === 'tick_sentence'
+                                    ? `${item.answer || 'N/A'}`
+                                    : item.answer || '(No answer provided)'}
+                                </span>
+                              </li>
+                            ))}
+                          </ol>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 </div>
               )}
