@@ -464,6 +464,618 @@ export function measureAndPaginate(container, sheet, showHeader = true) {
   return pages;
 }
 
+// --- Question + Answer Solved Item Resolution Helper for all 9 Section Types ---
+export function resolveSolvedItem(section, item, idx) {
+  if (!section || !item) {
+    return {
+      type: 'unknown',
+      itemIndex: idx,
+      question: '',
+      answer: '',
+      displayAnswer: ''
+    };
+  }
+
+  const type = section.type;
+
+  switch (type) {
+    case 'short_qa':
+    case 'math_box': {
+      const question = item.prompt || '';
+      const rawAns = item.answer && String(item.answer).trim();
+      const answer = rawAns || '(No answer provided)';
+      return {
+        type,
+        itemIndex: idx,
+        question,
+        answer,
+        displayAnswer: answer,
+        isProvided: Boolean(rawAns)
+      };
+    }
+
+    case 'fill_blanks': {
+      const rawPrompt = item.prompt || '';
+      const rawAns = item.answer && String(item.answer).trim();
+      const answerSegments = rawAns
+        ? rawAns.split(/[,/|]/).map((s) => s.trim()).filter(Boolean)
+        : [];
+
+      let blankCounter = 0;
+      const parts = rawPrompt.split(/(_+)/g).map((part) => {
+        if (/^_+$/.test(part)) {
+          let fillText = '';
+          if (answerSegments.length > 0) {
+            fillText = answerSegments[blankCounter] !== undefined
+              ? answerSegments[blankCounter]
+              : (answerSegments.length === 1 ? answerSegments[0] : part);
+          }
+          blankCounter++;
+          return {
+            text: fillText || part,
+            isAnswer: Boolean(fillText),
+            isBlank: !fillText,
+            originalBlank: part
+          };
+        }
+        return {
+          text: part,
+          isAnswer: false,
+          isBlank: false
+        };
+      });
+
+      const fullSentence = parts.map((p) => p.text).join('');
+      return {
+        type,
+        itemIndex: idx,
+        question: rawPrompt,
+        answer: rawAns || '(No answer provided)',
+        parts,
+        fullSentence,
+        displayAnswer: fullSentence,
+        isProvided: Boolean(rawAns)
+      };
+    }
+
+    case 'true_false': {
+      const question = item.prompt || '';
+      const rawAns = item.answer && String(item.answer).trim();
+      const ansVal = rawAns || 'True';
+      return {
+        type,
+        itemIndex: idx,
+        question,
+        answer: ansVal,
+        displayAnswer: `[ ${ansVal} ]`,
+        isProvided: Boolean(rawAns)
+      };
+    }
+
+    case 'matching': {
+      const left = item.left || '';
+      const right = item.right || '';
+      const rawAns = item.answer && String(item.answer).trim();
+
+      let matchedRightText = '';
+      if (rawAns && section.items) {
+        const letterMatch = rawAns.match(/(?:->|-|:|\s|^)\s*([a-zA-Z])(?:\.|\)|$|\s)/) || rawAns.match(/[a-zA-Z]/);
+        if (letterMatch) {
+          const letter = letterMatch[1].toLowerCase();
+          const targetIdx = letter.charCodeAt(0) - 97;
+          const found = section.items.find((it) =>
+            new RegExp(`^\\s*${letter}[.)\\-\\s]`, 'i').test(it.right || '')
+          ) || section.items[targetIdx];
+          if (found && found.right) {
+            matchedRightText = found.right.trim();
+          }
+        }
+      }
+
+      let displayAnswer = '';
+      if (rawAns) {
+        if (matchedRightText) {
+          displayAnswer = `${rawAns} (${matchedRightText})`;
+        } else {
+          displayAnswer = rawAns;
+        }
+      } else {
+        displayAnswer = `${left} → ${right}`;
+      }
+
+      return {
+        type,
+        itemIndex: idx,
+        question: left,
+        referenceRight: right,
+        answer: rawAns || `${left} → ${right}`,
+        matchedRightText,
+        displayAnswer,
+        isProvided: Boolean(rawAns)
+      };
+    }
+
+    case 'mcq': {
+      const question = item.prompt || '';
+      const options = item.options || [];
+      const rawAns = item.answer && String(item.answer).trim();
+
+      let resolvedIdx = -1;
+      if (rawAns) {
+        const letterMatch = rawAns.match(/^\(?\s*([a-zA-Z])\s*[\).:]?$/) || rawAns.match(/\b([a-zA-Z])\b/);
+        if (letterMatch) {
+          const charCode = letterMatch[1].toLowerCase().charCodeAt(0) - 97;
+          if (charCode >= 0 && charCode < options.length) {
+            resolvedIdx = charCode;
+          }
+        }
+        if (resolvedIdx === -1) {
+          const numMatch = rawAns.match(/^(\d+)$/);
+          if (numMatch) {
+            const num = parseInt(numMatch[1], 10) - 1;
+            if (num >= 0 && num < options.length) {
+              resolvedIdx = num;
+            }
+          }
+        }
+        if (resolvedIdx === -1 && options.length > 0) {
+          const directIdx = options.findIndex((opt) => opt.trim().toLowerCase() === rawAns.toLowerCase());
+          if (directIdx !== -1) {
+            resolvedIdx = directIdx;
+          } else {
+            const fuzzyIdx = options.findIndex((opt) =>
+              opt.toLowerCase().includes(rawAns.toLowerCase()) || rawAns.toLowerCase().includes(opt.toLowerCase())
+            );
+            if (fuzzyIdx !== -1) resolvedIdx = fuzzyIdx;
+          }
+        }
+      }
+
+      let displayAnswer = '';
+      let correctOptionText = '';
+      let correctOptionLetter = '';
+
+      if (resolvedIdx >= 0 && resolvedIdx < options.length) {
+        correctOptionLetter = String.fromCharCode(97 + resolvedIdx);
+        correctOptionText = options[resolvedIdx];
+        displayAnswer = `✓ (${correctOptionLetter}) ${correctOptionText}`;
+      } else {
+        displayAnswer = rawAns || '(No answer provided)';
+      }
+
+      return {
+        type,
+        itemIndex: idx,
+        question,
+        options,
+        answer: rawAns || '(No answer provided)',
+        resolvedIdx,
+        correctOptionLetter,
+        correctOptionText,
+        displayAnswer,
+        isProvided: Boolean(rawAns)
+      };
+    }
+
+    case 'word_meaning': {
+      const word = item.word || '';
+      const meaning = item.meaning || item.answer || 'N/A';
+      const sentence = item.sentence && item.sentence.trim() ? item.sentence.trim() : '';
+
+      return {
+        type,
+        itemIndex: idx,
+        question: word,
+        word,
+        meaning,
+        sentence,
+        answer: meaning + (sentence ? ` (Sentence: ${sentence})` : ''),
+        displayAnswer: sentence ? `${meaning} | Sentence: ${sentence}` : meaning,
+        isProvided: Boolean(item.meaning || item.answer)
+      };
+    }
+
+    case 'passage_cloze': {
+      const passage = item.passage || '';
+      const rawAns = item.answer && String(item.answer).trim();
+      const answer = rawAns || '(No answer provided)';
+
+      return {
+        type,
+        itemIndex: idx,
+        question: passage,
+        passage,
+        answer,
+        displayAnswer: answer,
+        isProvided: Boolean(rawAns)
+      };
+    }
+
+    case 'tick_sentence': {
+      const sentenceA = item.sentenceA || '';
+      const sentenceB = item.sentenceB || '';
+      const rawAns = item.answer && String(item.answer).trim().toUpperCase();
+      const isB = rawAns === 'B' || rawAns === '2';
+      const correctChoice = isB ? 'B' : 'A';
+      const correctSentence = isB ? sentenceB : sentenceA;
+
+      return {
+        type,
+        itemIndex: idx,
+        questionA: sentenceA,
+        questionB: sentenceB,
+        question: `A. ${sentenceA} | B. ${sentenceB}`,
+        answer: correctChoice,
+        correctChoice,
+        correctSentence,
+        displayAnswer: `✓ [${correctChoice}] ${correctSentence}`,
+        isProvided: Boolean(rawAns)
+      };
+    }
+
+    default: {
+      const rawAns = item.answer && String(item.answer).trim();
+      return {
+        type,
+        itemIndex: idx,
+        question: item.prompt || '',
+        answer: rawAns || '(No answer provided)',
+        displayAnswer: rawAns || '(No answer provided)',
+        isProvided: Boolean(rawAns)
+      };
+    }
+  }
+}
+
+// Estimate height for solved Answer Key items in mm
+export function estimateSolvedItemHeightMm(section, item, idx) {
+  const solved = resolveSolvedItem(section, item, idx);
+  switch (section.type) {
+    case 'short_qa':
+    case 'math_box': {
+      const qLines = Math.max(1, Math.ceil(((solved.question || '').length + 4) / 85));
+      const aLines = Math.max(1, Math.ceil(((solved.answer || '').length + 8) / 80));
+      return qLines * 4.6 + aLines * 4.4 + 4.5;
+    }
+    case 'fill_blanks': {
+      const lines = Math.max(1, Math.ceil(((solved.fullSentence || '').length + 4) / 85));
+      return lines * 5.0 + 3.0;
+    }
+    case 'true_false': {
+      const lines = Math.max(1, Math.ceil(((solved.question || '').length + 18) / 80));
+      return lines * 4.8 + 2.5;
+    }
+    case 'matching': {
+      const lines = Math.max(1, Math.ceil(((solved.question || '').length + (solved.displayAnswer || '').length + 8) / 80));
+      return lines * 4.8 + 2.5;
+    }
+    case 'mcq': {
+      const qLines = Math.max(1, Math.ceil(((solved.question || '').length + 4) / 85));
+      const optRows = Math.ceil(((solved.options || []).length || 2) / 2);
+      return qLines * 4.6 + optRows * 4.8 + 3.5;
+    }
+    case 'word_meaning': {
+      const mainLines = Math.max(1, Math.ceil(((solved.word || '').length + (solved.meaning || '').length + 6) / 80));
+      const sLines = solved.sentence ? Math.max(1, Math.ceil(((solved.sentence || '').length + 12) / 80)) : 0;
+      return mainLines * 4.6 + (sLines ? sLines * 4.2 + 2 : 0) + 4.0;
+    }
+    case 'passage_cloze': {
+      const pLines = Math.max(1, Math.ceil((solved.passage || '').length / 85));
+      const aLines = Math.max(1, Math.ceil(((solved.answer || '').length + 10) / 80));
+      return pLines * 4.5 + aLines * 4.4 + 6.0;
+    }
+    case 'tick_sentence': {
+      const aLines = Math.max(1, Math.ceil(((solved.questionA || '').length + 8) / 80));
+      const bLines = Math.max(1, Math.ceil(((solved.questionB || '').length + 8) / 80));
+      return 4.5 + aLines * 4.4 + bLines * 4.4 + 4.0;
+    }
+    default: {
+      return 10.0;
+    }
+  }
+}
+
+// Independent Multi-Page Answer Key Pagination
+export function paginateAnswerKey(worksheet, container = null) {
+  if (!worksheet || !Array.isArray(worksheet.sections)) return [];
+
+  const pages = [];
+  let currentPage = { pageNumber: 1, sections: [] };
+
+  const getHeaderHeight = (isFirstPage) => {
+    if (container && typeof window !== 'undefined') {
+      const el = container.querySelector(
+        isFirstPage ? '[data-ak-measure-header="page1"]' : '[data-ak-measure-header="cont"]'
+      );
+      if (el) {
+        const rectH = el.getBoundingClientRect().height * PX_TO_MM;
+        const style = window.getComputedStyle(el);
+        const mb = (parseFloat(style.marginBottom) || 0) * PX_TO_MM;
+        if (rectH > 0) return rectH + mb;
+      }
+    }
+    return isFirstPage ? 24 : 16;
+  };
+
+  let currentUsedMm = getHeaderHeight(true);
+
+  const pushNewPage = () => {
+    pages.push(currentPage);
+    currentPage = { pageNumber: pages.length + 1, sections: [] };
+    currentUsedMm = getHeaderHeight(false);
+  };
+
+  worksheet.sections.forEach((sec, secIdx) => {
+    const getSecHeaderHeight = (isCont) => {
+      if (container && typeof window !== 'undefined') {
+        const el = container.querySelector(
+          isCont
+            ? `[data-ak-measure-sec-cont="${secIdx}"]`
+            : `[data-ak-measure-sec-header="${secIdx}"]`
+        );
+        if (el) {
+          const rectH = el.getBoundingClientRect().height * PX_TO_MM;
+          const style = window.getComputedStyle(el);
+          const mb = (parseFloat(style.marginBottom) || 0) * PX_TO_MM;
+          if (rectH > 0) return rectH + mb;
+        }
+      }
+      return isCont ? 7.5 : 8.5;
+    };
+
+    const getItemHeight = (item, itemIdx) => {
+      if (container && typeof window !== 'undefined') {
+        const el = container.querySelector(`[data-ak-measure-item="${secIdx}-${itemIdx}"]`);
+        if (el) {
+          const rectH = el.getBoundingClientRect().height * PX_TO_MM;
+          const style = window.getComputedStyle(el);
+          const mb = (parseFloat(style.marginBottom) || 0) * PX_TO_MM;
+          if (rectH > 0) return rectH + mb;
+        }
+      }
+      return estimateSolvedItemHeightMm(sec, item, itemIdx);
+    };
+
+    const normalSecHeaderMm = getSecHeaderHeight(false);
+    const contSecHeaderMm = getSecHeaderHeight(true);
+    const SEC_GAP_MM = 4.5;
+
+    if (!sec.items || sec.items.length === 0) {
+      if (currentUsedMm + normalSecHeaderMm + SEC_GAP_MM > TARGET_INTERIOR_MM && currentPage.sections.length > 0) {
+        pushNewPage();
+      }
+      currentPage.sections.push({
+        ...sec,
+        startIndex: 0,
+        isContinuation: false,
+        items: []
+      });
+      currentUsedMm += normalSecHeaderMm + SEC_GAP_MM;
+      return;
+    }
+
+    let itemIdx = 0;
+    let isContinuation = false;
+
+    while (itemIdx < sec.items.length) {
+      const activeHeaderMm = isContinuation ? contSecHeaderMm : normalSecHeaderMm;
+      const firstItemMm = getItemHeight(sec.items[itemIdx], itemIdx);
+
+      if (currentUsedMm + activeHeaderMm + firstItemMm > TARGET_INTERIOR_MM && currentPage.sections.length > 0) {
+        pushNewPage();
+      }
+
+      const pageHeaderCost = isContinuation ? contSecHeaderMm : normalSecHeaderMm;
+      currentUsedMm += pageHeaderCost;
+
+      const pageItems = [];
+      const startIndex = itemIdx;
+
+      while (itemIdx < sec.items.length) {
+        const itemMm = getItemHeight(sec.items[itemIdx], itemIdx);
+        if (currentUsedMm + itemMm > TARGET_INTERIOR_MM && pageItems.length > 0) {
+          break;
+        }
+        pageItems.push(sec.items[itemIdx]);
+        currentUsedMm += itemMm;
+        itemIdx++;
+      }
+
+      currentPage.sections.push({
+        ...sec,
+        startIndex,
+        isContinuation,
+        items: pageItems
+      });
+
+      currentUsedMm += SEC_GAP_MM;
+      isContinuation = true;
+    }
+  });
+
+  if (currentPage.sections.length > 0 || pages.length === 0) {
+    pages.push(currentPage);
+  }
+
+  return pages;
+}
+
+// Pure React Component for rendering solved Question + Answer cards
+export function SolvedItemCard({ section, item, idx, startIndex = 0 }) {
+  const solved = resolveSolvedItem(section, item, idx);
+  const itemNumber = startIndex + idx + 1;
+
+  switch (section.type) {
+    case 'short_qa':
+    case 'math_box': {
+      return (
+        <div className="text-xs text-slate-900">
+          <div className="flex items-baseline gap-1.5 font-semibold text-slate-800 mb-0.5">
+            <span className="font-bold shrink-0">{itemNumber}.</span>
+            <span>{solved.question}</span>
+          </div>
+          <div className="pl-4 text-indigo-950 font-medium bg-slate-50 border-l-2 border-indigo-500 py-1 px-2 rounded-r">
+            <span className="font-bold text-indigo-700 mr-1.5">Ans:</span>
+            <span>{solved.answer}</span>
+          </div>
+        </div>
+      );
+    }
+
+    case 'fill_blanks': {
+      return (
+        <div className="text-xs text-slate-900 leading-relaxed">
+          <span className="font-bold mr-1.5 shrink-0">{itemNumber}.</span>
+          {solved.parts.map((part, pIdx) =>
+            part.isAnswer ? (
+              <span key={pIdx} className="font-bold underline decoration-indigo-600 decoration-2 px-0.5 text-indigo-950">
+                {part.text}
+              </span>
+            ) : part.isBlank ? (
+              <span key={pIdx} className="inline-block border-b-2 border-slate-900 mx-1 min-w-[36px]">
+                &nbsp;
+              </span>
+            ) : (
+              <span key={pIdx}>{part.text}</span>
+            )
+          )}
+        </div>
+      );
+    }
+
+    case 'true_false': {
+      return (
+        <div className="flex items-baseline justify-between gap-2 text-xs">
+          <div className="flex items-baseline gap-1.5">
+            <span className="font-bold shrink-0">{itemNumber}.</span>
+            <span className="text-slate-800">{solved.question}</span>
+          </div>
+          <span className="font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-900 border border-slate-300 shrink-0">
+            {solved.displayAnswer}
+          </span>
+        </div>
+      );
+    }
+
+    case 'matching': {
+      return (
+        <div className="text-xs text-slate-900 flex items-baseline gap-2">
+          <span className="font-bold shrink-0">{itemNumber}.</span>
+          <span className="font-semibold text-slate-800">{solved.question}</span>
+          <span className="text-slate-400">→</span>
+          <span className="font-bold text-indigo-900">{solved.displayAnswer}</span>
+        </div>
+      );
+    }
+
+    case 'mcq': {
+      return (
+        <div className="text-xs text-slate-900">
+          <div className="flex items-baseline gap-1.5 font-semibold text-slate-800 mb-1">
+            <span className="font-bold shrink-0">{itemNumber}.</span>
+            <span>{solved.question}</span>
+          </div>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1 pl-4">
+            {(solved.options || []).map((opt, oIdx) => {
+              const isCorrect = oIdx === solved.resolvedIdx;
+              const letter = String.fromCharCode(97 + oIdx);
+              return (
+                <div
+                  key={oIdx}
+                  className={`flex items-center gap-1.5 py-0.5 px-2 rounded ${
+                    isCorrect
+                      ? 'bg-emerald-50 text-emerald-950 font-bold border border-emerald-300'
+                      : 'text-slate-600'
+                  }`}
+                >
+                  <span className="font-bold">{isCorrect ? '✓' : `(${letter})`}</span>
+                  <span>{isCorrect ? `(${letter}) ${opt}` : opt}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      );
+    }
+
+    case 'word_meaning': {
+      return (
+        <div className="text-xs text-slate-900 bg-slate-50 border border-slate-200 rounded p-2">
+          <div className="flex items-baseline gap-2 mb-1">
+            <span className="font-bold text-slate-900 shrink-0">{itemNumber}. {solved.word}:</span>
+            <span className="font-medium text-slate-800">{solved.meaning}</span>
+          </div>
+          {solved.sentence && (
+            <div className="pl-4 text-slate-600 italic">
+              <span className="font-semibold not-italic text-slate-700">Sentence: </span>
+              {solved.sentence}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    case 'passage_cloze': {
+      return (
+        <div className="text-xs text-slate-900">
+          <div className="mb-1 text-justify leading-relaxed text-slate-800 bg-slate-50 p-2.5 rounded border border-slate-200">
+            {solved.passage}
+          </div>
+          <div className="pl-2 font-medium text-indigo-950">
+            <span className="font-bold text-indigo-700 mr-1.5">Answer:</span>
+            <span className="font-bold underline decoration-indigo-500">{solved.answer}</span>
+          </div>
+        </div>
+      );
+    }
+
+    case 'tick_sentence': {
+      return (
+        <div className="text-xs text-slate-900">
+          <div className="font-bold text-slate-800 mb-1">{itemNumber}. Select the correct sentence:</div>
+          <div className="space-y-1 pl-4">
+            <div
+              className={`flex items-center gap-2 py-0.5 px-2 rounded ${
+                solved.correctChoice === 'A'
+                  ? 'bg-emerald-50 text-emerald-950 font-bold border border-emerald-300'
+                  : 'text-slate-600'
+              }`}
+            >
+              <span className="font-bold">{solved.correctChoice === 'A' ? '✓ [A]' : '[ ] A'}</span>
+              <span>{solved.questionA}</span>
+            </div>
+            <div
+              className={`flex items-center gap-2 py-0.5 px-2 rounded ${
+                solved.correctChoice === 'B'
+                  ? 'bg-emerald-50 text-emerald-950 font-bold border border-emerald-300'
+                  : 'text-slate-600'
+              }`}
+            >
+              <span className="font-bold">{solved.correctChoice === 'B' ? '✓ [B]' : '[ ] B'}</span>
+              <span>{solved.questionB}</span>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    default: {
+      return (
+        <div className="text-xs text-slate-900">
+          <div className="flex items-baseline gap-1.5 font-semibold text-slate-800 mb-0.5">
+            <span className="font-bold shrink-0">{itemNumber}.</span>
+            <span>{solved.question}</span>
+          </div>
+          <div className="pl-4 text-indigo-950 font-medium bg-slate-50 border-l-2 border-indigo-500 py-1 px-2 rounded-r">
+            <span className="font-bold text-indigo-700 mr-1.5">Ans:</span>
+            <span>{solved.answer}</span>
+          </div>
+        </div>
+      );
+    }
+  }
+}
+
 // Exact shared print and preview typography & layout stylesheet (Scoped to worksheet containers)
 export function getWorksheetPrintCss(fontStack, options = false) {
   const isStandalone = typeof options === 'boolean' ? options : Boolean(options?.standalone);
@@ -1047,35 +1659,8 @@ export function getWorksheetPrintCss(fontStack, options = false) {
     .worksheet-measure-harness .answer-key-page,
     .worksheet-measure-container .answer-key-page {
       width: 198mm;
-      padding: 5mm 4mm 3mm 12mm;
+      padding: 5mm 4mm 7mm 12mm;
       margin: 0 auto;
-      page-break-before: always;
-      break-before: page;
-    }
-    .a4-sheet.answer-key-page > div:first-child,
-    .worksheet-measure-harness .answer-key-page > div:first-child,
-    .worksheet-measure-container .answer-key-page > div:first-child {
-      border-bottom: 2px solid #0f172a;
-      padding-bottom: 8px;
-      margin-bottom: 14px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    .a4-sheet.answer-key-page ul,
-    .worksheet-measure-harness .answer-key-page ul,
-    .worksheet-measure-container .answer-key-page ul {
-      padding-left: 20px;
-      margin: 6px 0 12px 0;
-      font-size: 13.5px;
-    }
-    .a4-sheet.answer-key-page li,
-    .worksheet-measure-harness .answer-key-page li,
-    .worksheet-measure-container .answer-key-page li {
-      font-size: 13.5px;
-      margin-bottom: 4px;
-      display: list-item;
-      list-style-type: disc;
     }
     .worksheet-measure-container,
     .worksheet-measure-harness {
@@ -1208,6 +1793,7 @@ export function WafiWorksheetBuilder({
   const printAreaRef = useRef(null);
   const measureContainerRef = useRef(null);
   const answerKeySheetRef = useRef(null);
+  const answerKeyMeasureRef = useRef(null);
 
   const fontStack =
     paperFontStyle === 'serif'
@@ -2028,74 +2614,340 @@ export function WafiWorksheetBuilder({
 
       // --- Optional Answer Key Pages ---
       if (showAnswerKey) {
+        const drawAkHeader = (cCtx, isCont) => {
+          const hY = 18;
+          cCtx.fillStyle = '#020617';
+          cCtx.font = `700 5.2px ${fontStack}`;
+          cCtx.textAlign = 'left';
+          cCtx.fillText('ANSWER KEY', MARGIN_LEFT, hY);
+          if (isCont) {
+            const titleW = cCtx.measureText('ANSWER KEY').width;
+            cCtx.font = `italic 400 3.6px ${fontStack}`;
+            cCtx.fillStyle = '#64748b';
+            cCtx.fillText(' (Continued)', MARGIN_LEFT + titleW + 2, hY);
+          }
+
+          cCtx.font = `400 3.6px ${fontStack}`;
+          cCtx.fillStyle = '#475569';
+          cCtx.fillText(`[${worksheet.header.chapter || 'Chapter'}]`, MARGIN_LEFT, hY + 5.5);
+
+          cCtx.textAlign = 'right';
+          cCtx.font = `600 3.2px ${fontStack}`;
+          cCtx.fillStyle = '#92400e';
+          cCtx.fillText('Teacher / Parent Reference', MARGIN_LEFT + CONTENT_W, hY);
+          cCtx.textAlign = 'left';
+
+          cCtx.beginPath();
+          cCtx.strokeStyle = '#0f172a';
+          cCtx.lineWidth = 0.4;
+          cCtx.moveTo(MARGIN_LEFT, hY + 8.5);
+          cCtx.lineTo(MARGIN_LEFT + CONTENT_W, hY + 8.5);
+          cCtx.stroke();
+
+          return hY + 14;
+        };
+
+        const drawAkSectionHeader = (cCtx, title, isCont, atY) => {
+          cCtx.fillStyle = '#020617';
+          cCtx.font = `700 4.1px ${fontStack}`;
+          cCtx.textAlign = 'left';
+          cCtx.fillText(title, MARGIN_LEFT, atY);
+          if (isCont) {
+            const titleW = cCtx.measureText(title).width;
+            cCtx.font = `italic 400 3.4px ${fontStack}`;
+            cCtx.fillStyle = '#64748b';
+            cCtx.fillText(' (continued)', MARGIN_LEFT + titleW + 2, atY);
+          }
+
+          cCtx.beginPath();
+          cCtx.strokeStyle = '#94a3b8';
+          cCtx.lineWidth = 0.25;
+          cCtx.moveTo(MARGIN_LEFT, atY + 1.8);
+          cCtx.lineTo(MARGIN_LEFT + CONTENT_W, atY + 1.8);
+          cCtx.stroke();
+          return atY + 6.5;
+        };
+
+        const drawAkFooter = (cCtx, pageNum, totalPages) => {
+          cCtx.textAlign = 'right';
+          cCtx.fillStyle = '#64748b';
+          cCtx.font = `400 3.2px ${fontStack}`;
+          cCtx.fillText(`Answer Key — Page ${pageNum} of ${totalPages}`, MARGIN_LEFT + CONTENT_W, PAGE_H - 6);
+          cCtx.textAlign = 'left';
+        };
+
+        // Measure / Render item on canvas
+        const processCanvasItem = (cCtx, section, item, idx, atY, isDryRun) => {
+          const solved = resolveSolvedItem(section, item, idx);
+          const startNum = (section.startIndex || 0) + idx + 1;
+          let curY = atY;
+
+          switch (section.type) {
+            case 'short_qa':
+            case 'math_box': {
+              const qText = `${startNum}. ${solved.question}`;
+              const qLines = wrapTextLines(cCtx, qText, CONTENT_W - 4);
+              const aText = `Ans: ${solved.answer}`;
+              const aLines = wrapTextLines(cCtx, aText, CONTENT_W - 10);
+              const blockH = qLines.length * 4.6 + aLines.length * 4.4 + 4.5;
+              if (!isDryRun) {
+                cCtx.fillStyle = '#0f172a';
+                cCtx.font = `600 3.8px ${fontStack}`;
+                qLines.forEach((line, lIdx) => {
+                  cCtx.fillText(line, MARGIN_LEFT, curY + lIdx * 4.6);
+                });
+                curY += qLines.length * 4.6 + 1.0;
+
+                cCtx.fillStyle = '#1e1b4b';
+                cCtx.font = `500 3.6px ${fontStack}`;
+                aLines.forEach((line, lIdx) => {
+                  cCtx.fillText(line, MARGIN_LEFT + 5, curY + lIdx * 4.4);
+                });
+              }
+              return blockH;
+            }
+
+            case 'fill_blanks': {
+              const fullText = `${startNum}. ${solved.fullSentence}`;
+              const lines = wrapTextLines(cCtx, fullText, CONTENT_W - 4);
+              const blockH = lines.length * 4.8 + 2.5;
+              if (!isDryRun) {
+                cCtx.fillStyle = '#020617';
+                cCtx.font = `500 3.8px ${fontStack}`;
+                lines.forEach((line, lIdx) => {
+                  cCtx.fillText(line, MARGIN_LEFT, curY + lIdx * 4.8);
+                });
+              }
+              return blockH;
+            }
+
+            case 'true_false': {
+              const promptText = `${startNum}. ${solved.question}`;
+              const pLines = wrapTextLines(cCtx, promptText, CONTENT_W - 24);
+              const blockH = pLines.length * 4.8 + 2.5;
+              if (!isDryRun) {
+                cCtx.fillStyle = '#020617';
+                cCtx.font = `400 3.8px ${fontStack}`;
+                pLines.forEach((line, lIdx) => {
+                  cCtx.fillText(line, MARGIN_LEFT, curY + lIdx * 4.8);
+                });
+                cCtx.fillStyle = '#0f172a';
+                cCtx.font = `700 3.7px ${fontStack}`;
+                cCtx.textAlign = 'right';
+                cCtx.fillText(solved.displayAnswer, MARGIN_LEFT + CONTENT_W, curY);
+                cCtx.textAlign = 'left';
+              }
+              return blockH;
+            }
+
+            case 'matching': {
+              const matchText = `${startNum}. ${solved.question}  →  ${solved.displayAnswer}`;
+              const lines = wrapTextLines(cCtx, matchText, CONTENT_W - 4);
+              const blockH = lines.length * 4.8 + 2.0;
+              if (!isDryRun) {
+                cCtx.fillStyle = '#020617';
+                cCtx.font = `500 3.8px ${fontStack}`;
+                lines.forEach((line, lIdx) => {
+                  cCtx.fillText(line, MARGIN_LEFT, curY + lIdx * 4.8);
+                });
+              }
+              return blockH;
+            }
+
+            case 'mcq': {
+              const promptText = `${startNum}. ${solved.question}`;
+              const pLines = wrapTextLines(cCtx, promptText, CONTENT_W - 4);
+              const opts = solved.options || [];
+              const rows = Math.ceil(opts.length / 2);
+              const blockH = pLines.length * 4.6 + Math.max(1, rows) * 4.8 + 3.0;
+              if (!isDryRun) {
+                cCtx.fillStyle = '#0f172a';
+                cCtx.font = `600 3.8px ${fontStack}`;
+                pLines.forEach((line, lIdx) => {
+                  cCtx.fillText(line, MARGIN_LEFT, curY + lIdx * 4.6);
+                });
+                curY += pLines.length * 4.6 + 1.2;
+
+                const colW = (CONTENT_W - 6) / 2;
+                opts.forEach((opt, oIdx) => {
+                  const isCorrect = oIdx === solved.resolvedIdx;
+                  const letter = String.fromCharCode(97 + oIdx);
+                  const col = oIdx % 2;
+                  const row = Math.floor(oIdx / 2);
+                  const ox = MARGIN_LEFT + 4 + col * colW;
+                  const oy = curY + row * 4.8;
+
+                  cCtx.fillStyle = isCorrect ? '#065f46' : '#334155';
+                  cCtx.font = isCorrect ? `700 3.6px ${fontStack}` : `400 3.6px ${fontStack}`;
+                  cCtx.fillText(isCorrect ? `✓ (${letter}) ${opt}` : `(${letter}) ${opt}`, ox, oy);
+                });
+              }
+              return blockH;
+            }
+
+            case 'word_meaning': {
+              const mainText = `${startNum}. ${solved.word}: ${solved.meaning}`;
+              const mLines = wrapTextLines(cCtx, mainText, CONTENT_W - 4);
+              const sLines = solved.sentence ? wrapTextLines(cCtx, `Sentence: ${solved.sentence}`, CONTENT_W - 10) : [];
+              const blockH = mLines.length * 4.6 + (sLines.length ? sLines.length * 4.2 + 1.5 : 0) + 2.5;
+              if (!isDryRun) {
+                cCtx.fillStyle = '#0f172a';
+                cCtx.font = `600 3.8px ${fontStack}`;
+                mLines.forEach((line, lIdx) => {
+                  cCtx.fillText(line, MARGIN_LEFT, curY + lIdx * 4.6);
+                });
+                if (sLines.length) {
+                  curY += mLines.length * 4.6 + 1.0;
+                  cCtx.fillStyle = '#475569';
+                  cCtx.font = `italic 400 3.5px ${fontStack}`;
+                  sLines.forEach((line, lIdx) => {
+                    cCtx.fillText(line, MARGIN_LEFT + 5, curY + lIdx * 4.2);
+                  });
+                }
+              }
+              return blockH;
+            }
+
+            case 'passage_cloze': {
+              const pLines = wrapTextLines(cCtx, solved.passage, CONTENT_W - 4);
+              const aLines = wrapTextLines(cCtx, `Answer: ${solved.answer}`, CONTENT_W - 8);
+              const blockH = pLines.length * 4.5 + aLines.length * 4.4 + 4.5;
+              if (!isDryRun) {
+                cCtx.fillStyle = '#334155';
+                cCtx.font = `400 3.6px ${fontStack}`;
+                pLines.forEach((line, lIdx) => {
+                  cCtx.fillText(line, MARGIN_LEFT, curY + lIdx * 4.5);
+                });
+                curY += pLines.length * 4.5 + 1.5;
+
+                cCtx.fillStyle = '#1e1b4b';
+                cCtx.font = `700 3.8px ${fontStack}`;
+                aLines.forEach((line, lIdx) => {
+                  cCtx.fillText(line, MARGIN_LEFT + 4, curY + lIdx * 4.4);
+                });
+              }
+              return blockH;
+            }
+
+            case 'tick_sentence': {
+              const headerText = `${startNum}. Select the correct sentence:`;
+              const textA = `${solved.correctChoice === 'A' ? '✓ [A]' : '[ ] A'} ${solved.questionA}`;
+              const textB = `${solved.correctChoice === 'B' ? '✓ [B]' : '[ ] B'} ${solved.questionB}`;
+              const linesA = wrapTextLines(cCtx, textA, CONTENT_W - 8);
+              const linesB = wrapTextLines(cCtx, textB, CONTENT_W - 8);
+              const blockH = 4.5 + linesA.length * 4.4 + linesB.length * 4.4 + 3.0;
+              if (!isDryRun) {
+                cCtx.fillStyle = '#0f172a';
+                cCtx.font = `600 3.7px ${fontStack}`;
+                cCtx.fillText(headerText, MARGIN_LEFT, curY);
+                curY += 4.5;
+
+                cCtx.fillStyle = solved.correctChoice === 'A' ? '#065f46' : '#334155';
+                cCtx.font = solved.correctChoice === 'A' ? `700 3.6px ${fontStack}` : `400 3.6px ${fontStack}`;
+                linesA.forEach((line, lIdx) => {
+                  cCtx.fillText(line, MARGIN_LEFT + 4, curY + lIdx * 4.4);
+                });
+                curY += linesA.length * 4.4 + 1.0;
+
+                cCtx.fillStyle = solved.correctChoice === 'B' ? '#065f46' : '#334155';
+                cCtx.font = solved.correctChoice === 'B' ? `700 3.6px ${fontStack}` : `400 3.6px ${fontStack}`;
+                linesB.forEach((line, lIdx) => {
+                  cCtx.fillText(line, MARGIN_LEFT + 4, curY + lIdx * 4.4);
+                });
+              }
+              return blockH;
+            }
+
+            default: {
+              const qText = `${startNum}. ${solved.question}`;
+              const qLines = wrapTextLines(cCtx, qText, CONTENT_W - 4);
+              const aLines = wrapTextLines(cCtx, `Ans: ${solved.answer}`, CONTENT_W - 10);
+              const blockH = qLines.length * 4.6 + aLines.length * 4.4 + 3.5;
+              if (!isDryRun) {
+                cCtx.fillStyle = '#0f172a';
+                cCtx.font = `600 3.8px ${fontStack}`;
+                qLines.forEach((line, lIdx) => {
+                  cCtx.fillText(line, MARGIN_LEFT, curY + lIdx * 4.6);
+                });
+                curY += qLines.length * 4.6 + 1.0;
+
+                cCtx.fillStyle = '#1e1b4b';
+                cCtx.font = `500 3.6px ${fontStack}`;
+                aLines.forEach((line, lIdx) => {
+                  cCtx.fillText(line, MARGIN_LEFT + 5, curY + lIdx * 4.4);
+                });
+              }
+              return blockH;
+            }
+          }
+        };
+
+        // --- Pass 1: Dry run to determine total Answer Key pages ---
+        let totalAkPages = 1;
+        {
+          const tempCanvas = document.createElement('canvas');
+          const dryCtx = tempCanvas.getContext('2d');
+          let dryY = 18 + 14;
+
+          worksheet.sections.forEach((section) => {
+            if (dryY + 10 > PAGE_H - 22) {
+              totalAkPages++;
+              dryY = 18 + 14;
+            }
+            dryY += 6.5;
+
+            (section.items || []).forEach((item, idx) => {
+              const itemH = processCanvasItem(dryCtx, section, item, idx, dryY, true);
+              if (dryY + itemH > PAGE_H - 22) {
+                totalAkPages++;
+                dryY = 18 + 14 + 6.5;
+              }
+              dryY += itemH;
+            });
+
+            dryY += 4;
+          });
+        }
+
+        // --- Pass 2: Draw and flush to PDF ---
         pdf.addPage();
-        const { canvas, ctx } = createPageCanvas();
-        let y = 18;
-
-        ctx.fillStyle = '#020617';
-        ctx.font = `700 5.2px ${fontStack}`;
-        ctx.fillText('ANSWER KEY', 22, y);
-        ctx.font = `400 3.6px ${fontStack}`;
-        ctx.fillStyle = '#475569';
-        ctx.fillText(`[${worksheet.header.chapter || 'Chapter'}]`, 22, y + 6);
-
-        ctx.beginPath();
-        ctx.strokeStyle = '#0f172a';
-        ctx.lineWidth = 0.4;
-        ctx.moveTo(22, y + 9);
-        ctx.lineTo(22 + CONTENT_W, y + 9);
-        ctx.stroke();
-
-        y += 18;
+        let { canvas, ctx } = createPageCanvas();
+        let akCurrentPage = 1;
+        let y = drawAkHeader(ctx, false);
 
         worksheet.sections.forEach((section) => {
-          ctx.fillStyle = '#020617';
-          ctx.font = `700 4.1px ${fontStack}`;
-          ctx.fillText(`${section.title}`, 22, y);
-
-          ctx.beginPath();
-          ctx.strokeStyle = '#94a3b8';
-          ctx.lineWidth = 0.25;
-          ctx.moveTo(22, y + 1.8);
-          ctx.lineTo(22 + CONTENT_W, y + 1.8);
-          ctx.stroke();
-          y += 7.5;
-
-          if (section.items && section.items.length > 0) {
-            ctx.font = `400 3.8px ${fontStack}`;
-            section.items.forEach((item, idx) => {
-              const ans =
-                section.type === 'matching'
-                  ? `${item.left} → ${item.right}`
-                  : section.type === 'word_meaning'
-                  ? `${item.word}: ${item.meaning || item.answer || 'N/A'}`
-                  : item.answer || '(no answer)';
-              const numStr = `${idx + 1}. `;
-              ctx.fillStyle = '#020617';
-              ctx.fillText(numStr, 26, y);
-
-              ctx.fillStyle = '#1e293b';
-              ctx.font = `600 3.8px ${fontStack}`;
-              const lineW = ctx.measureText(numStr).width;
-              const wrappedAns = wrapTextLines(ctx, ans, CONTENT_W - 10);
-              wrappedAns.forEach((line, lIdx) => {
-                ctx.fillText(line, 26 + (lIdx === 0 ? lineW : 0), y + lIdx * 5.1);
-              });
-
-              y += Math.max(wrappedAns.length * 5.1, 5.1) + 2.8;
-              ctx.font = `400 3.8px ${fontStack}`;
-            });
+          if (y + 10 > PAGE_H - 22) {
+            drawAkFooter(ctx, akCurrentPage, totalAkPages);
+            pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, PAGE_W, PAGE_H);
+            pdf.addPage();
+            akCurrentPage++;
+            ({ canvas, ctx } = createPageCanvas());
+            y = drawAkHeader(ctx, true);
           }
+
+          y = drawAkSectionHeader(ctx, section.title, false, y);
+
+          (section.items || []).forEach((item, idx) => {
+            const itemH = processCanvasItem(ctx, section, item, idx, y, true);
+            if (y + itemH > PAGE_H - 22) {
+              drawAkFooter(ctx, akCurrentPage, totalAkPages);
+              pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, PAGE_W, PAGE_H);
+              pdf.addPage();
+              akCurrentPage++;
+              ({ canvas, ctx } = createPageCanvas());
+              y = drawAkHeader(ctx, true);
+              y = drawAkSectionHeader(ctx, section.title, true, y);
+            }
+
+            processCanvasItem(ctx, section, item, idx, y, false);
+            y += itemH;
+          });
 
           y += 4;
-          if (y > PAGE_H - 24) {
-            pdf.addPage();
-            const newCanvas = createPageCanvas();
-            pdf.addImage(newCanvas.canvas.toDataURL('image/png'), 'PNG', 0, 0, PAGE_W, PAGE_H);
-            y = 18;
-          }
         });
 
+        // Final footer and flush
+        drawAkFooter(ctx, akCurrentPage, totalAkPages);
         pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, PAGE_W, PAGE_H);
       }
 
@@ -2146,6 +2998,41 @@ export function WafiWorksheetBuilder({
       isMounted = false;
     };
   }, [worksheet, paperFontStyle, resolvedShowHeader]);
+
+  // --- Measured Answer Key Pagination with Instant SSR Fallback ---
+  const [answerKeyPages, setAnswerKeyPages] = useState(() => paginateAnswerKey(worksheet));
+
+  useIsomorphicLayoutEffect(() => {
+    if (!showAnswerKey) return;
+    let isMounted = true;
+
+    const runAkMeasurement = () => {
+      if (!answerKeyMeasureRef.current) return;
+      try {
+        const measured = paginateAnswerKey(worksheet, answerKeyMeasureRef.current);
+        if (isMounted && measured && measured.length > 0) {
+          setAnswerKeyPages(measured);
+        }
+      } catch (err) {
+        console.warn('Answer Key DOM measurement error, falling back to heuristic:', err);
+        if (isMounted) {
+          setAnswerKeyPages(paginateAnswerKey(worksheet));
+        }
+      }
+    };
+
+    if (typeof document !== 'undefined' && document.fonts && document.fonts.ready) {
+      document.fonts.ready.then(() => {
+        if (isMounted) runAkMeasurement();
+      });
+    } else {
+      runAkMeasurement();
+    }
+
+    return () => {
+      isMounted = false;
+    };
+  }, [worksheet, paperFontStyle, showAnswerKey]);
 
   // --- Update a section ---
   const updateSection = (sectionId, updates) => {
@@ -4332,47 +5219,156 @@ export function WafiWorksheetBuilder({
                 </div>
               ))}
 
-              {/* ANSWER KEY IN PREVIEW (If Enabled) */}
+              {/* Off-Screen 182mm Measurement Harness for Answer Key */}
               {showAnswerKey && (
                 <div
-                  ref={answerKeySheetRef}
-                  className="a4-sheet answer-key-page break-before-page rounded-lg bg-white p-6 shadow-lg"
+                  ref={answerKeyMeasureRef}
+                  style={{
+                    position: 'fixed',
+                    left: '-99999px',
+                    top: 0,
+                    width: '182mm',
+                    visibility: 'hidden',
+                    pointerEvents: 'none',
+                    fontFamily: fontStack,
+                    boxSizing: 'border-box'
+                  }}
+                  className="worksheet-measure-container worksheet-measure-harness"
+                  aria-hidden="true"
                 >
-                  <div style={{ overflow: 'hidden', display: 'block', borderBottom: 'none' }}>
-                    <div className="border-b-2 border-slate-900 pb-2 mb-4 flex justify-between items-center">
-                      <div>
-                        <h2 className="text-lg font-bold uppercase tracking-wide">Answer Key</h2>
-                        <p className="text-xs text-slate-600">{worksheet.header.chapter || 'Chapter'}</p>
-                      </div>
-                      <span className="text-xs font-semibold px-2 py-1 bg-amber-100 text-amber-800 rounded">
-                        Teacher / Parent Reference
-                      </span>
+                  {/* Normal header measurement */}
+                  <div
+                    data-ak-measure-header="page1"
+                    className="border-b-2 border-slate-900 pb-2 mb-4 flex justify-between items-center"
+                  >
+                    <div>
+                      <h2 className="text-lg font-bold uppercase tracking-wide">Answer Key</h2>
+                      <p className="text-xs text-slate-600">{worksheet.header?.chapter || 'Chapter'}</p>
                     </div>
-                    <div className="space-y-4">
-                      {worksheet.sections.map((section) => (
-                        <div key={section.id}>
-                          <h4 className="text-sm font-bold border-b border-slate-300 pb-1 mb-2">{section.title}</h4>
-                          <ol className="list-decimal pl-5 space-y-1 text-xs">
-                            {section.items.map((item, idx) => (
-                              <li key={item.id} className="text-slate-800">
-                                <span className="font-semibold text-slate-900">
-                                  {section.type === 'matching'
-                                    ? (item.answer && String(item.answer).trim() ? item.answer : `${item.left} → ${item.right}`)
-                                    : section.type === 'word_meaning'
-                                    ? `${item.word}: ${item.meaning || item.answer || 'N/A'}`
-                                    : section.type === 'tick_sentence'
-                                    ? `${item.answer || 'N/A'}`
-                                    : item.answer || '(No answer provided)'}
-                                </span>
-                              </li>
-                            ))}
-                          </ol>
+                    <span className="text-xs font-semibold px-2 py-1 bg-amber-100 text-amber-800 rounded">
+                      Teacher / Parent Reference
+                    </span>
+                  </div>
+
+                  {/* Continuation header measurement */}
+                  <div
+                    data-ak-measure-header="cont"
+                    className="border-b-2 border-slate-900 pb-2 mb-4 flex justify-between items-center"
+                  >
+                    <div>
+                      <h2 className="text-lg font-bold uppercase tracking-wide">
+                        Answer Key <span className="text-xs italic font-normal text-slate-500">(Continued)</span>
+                      </h2>
+                      <p className="text-xs text-slate-600">{worksheet.header?.chapter || 'Chapter'}</p>
+                    </div>
+                    <span className="text-xs font-semibold px-2 py-1 bg-amber-100 text-amber-800 rounded">
+                      Teacher / Parent Reference
+                    </span>
+                  </div>
+
+                  {/* Sections & items measurement */}
+                  {(worksheet.sections || []).map((section, secIdx) => (
+                    <div key={section.id || secIdx} className="mb-4">
+                      <div data-ak-measure-sec-header={secIdx} className="border-b border-slate-400 pb-1 mb-2">
+                        <h4 className="text-sm font-bold">{section.title}</h4>
+                      </div>
+                      <div data-ak-measure-sec-cont={secIdx} className="border-b border-slate-400 pb-1 mb-2">
+                        <h4 className="text-sm font-bold">
+                          {section.title}
+                          <span className="text-xs italic font-normal text-slate-500"> (continued)</span>
+                        </h4>
+                      </div>
+                      {(section.items || []).map((item, idx) => (
+                        <div
+                          key={item.id || idx}
+                          data-ak-measure-item={`${secIdx}-${idx}`}
+                          className="mb-2.5"
+                        >
+                          <SolvedItemCard
+                            section={section}
+                            item={item}
+                            idx={idx}
+                            startIndex={section.startIndex || 0}
+                          />
                         </div>
                       ))}
                     </div>
-                  </div>
+                  ))}
                 </div>
               )}
+
+              {/* ANSWER KEY IN PREVIEW & PRINT (Multi-page with Pinned 6.0mm Footer) */}
+              {showAnswerKey &&
+                answerKeyPages.map((akPage, akIdx) => (
+                  <div
+                    key={`ak-page-${akPage.pageNumber}`}
+                    ref={akIdx === 0 ? answerKeySheetRef : undefined}
+                    className="a4-sheet answer-key-page rounded-lg bg-white p-6 shadow-lg relative"
+                    style={{ minHeight: '297mm', position: 'relative' }}
+                  >
+                    <div style={{ overflow: 'hidden' }}>
+                      {/* Header */}
+                      <div className="border-b-2 border-slate-900 pb-2 mb-4 flex justify-between items-center">
+                        <div>
+                          <h2 className="text-lg font-bold uppercase tracking-wide">
+                            Answer Key{' '}
+                            {akPage.pageNumber > 1 && (
+                              <span className="text-xs italic font-normal text-slate-500">(Continued)</span>
+                            )}
+                          </h2>
+                          <p className="text-xs text-slate-600">{worksheet.header?.chapter || 'Chapter'}</p>
+                        </div>
+                        <span className="text-xs font-semibold px-2 py-1 bg-amber-100 text-amber-800 rounded">
+                          Teacher / Parent Reference
+                        </span>
+                      </div>
+
+                      {/* Sections & Items */}
+                      <div className="space-y-4">
+                        {akPage.sections.map((section, secIdx) => (
+                          <div key={section.id || secIdx}>
+                            <div className="border-b border-slate-400 pb-1 mb-2">
+                              <h4 className="text-sm font-bold">
+                                {section.title}
+                                {section.isContinuation && (
+                                  <span className="text-xs italic font-normal text-slate-500"> (continued)</span>
+                                )}
+                              </h4>
+                            </div>
+                            <div className="space-y-2">
+                              {(section.items || []).map((item, idx) => (
+                                <div key={item.id || idx}>
+                                  <SolvedItemCard
+                                    section={section}
+                                    item={item}
+                                    idx={idx}
+                                    startIndex={section.startIndex || 0}
+                                  />
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Pinned 6.0mm Footer */}
+                    <div
+                      style={{
+                        position: 'absolute',
+                        bottom: '1.5mm',
+                        left: '12mm',
+                        right: '4mm',
+                        textAlign: 'right',
+                        fontSize: '11px',
+                        color: '#64748b',
+                        lineHeight: 1
+                      }}
+                    >
+                      Answer Key — Page {akPage.pageNumber} of {answerKeyPages.length}
+                    </div>
+                  </div>
+                ))}
             </div>
           </div>
         </div>
