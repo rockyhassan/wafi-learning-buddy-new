@@ -472,11 +472,13 @@ export function resolveSolvedItem(section, item, idx) {
       itemIndex: idx,
       question: '',
       answer: '',
-      displayAnswer: ''
+      displayAnswer: '',
+      explanation: ''
     };
   }
 
   const type = section.type;
+  const explanation = (item.explanation && String(item.explanation).trim()) || '';
 
   switch (type) {
     case 'short_qa':
@@ -490,7 +492,8 @@ export function resolveSolvedItem(section, item, idx) {
         question,
         answer,
         displayAnswer: answer,
-        isProvided: Boolean(rawAns)
+        isProvided: Boolean(rawAns),
+        explanation
       };
     }
 
@@ -534,7 +537,8 @@ export function resolveSolvedItem(section, item, idx) {
         parts,
         fullSentence,
         displayAnswer: fullSentence,
-        isProvided: Boolean(rawAns)
+        isProvided: Boolean(rawAns),
+        explanation
       };
     }
 
@@ -548,7 +552,8 @@ export function resolveSolvedItem(section, item, idx) {
         question,
         answer: ansVal,
         displayAnswer: `[ ${ansVal} ]`,
-        isProvided: Boolean(rawAns)
+        isProvided: Boolean(rawAns),
+        explanation
       };
     }
 
@@ -591,7 +596,8 @@ export function resolveSolvedItem(section, item, idx) {
         answer: rawAns || `${left} → ${right}`,
         matchedRightText,
         displayAnswer,
-        isProvided: Boolean(rawAns)
+        isProvided: Boolean(rawAns),
+        explanation
       };
     }
 
@@ -653,7 +659,8 @@ export function resolveSolvedItem(section, item, idx) {
         correctOptionLetter,
         correctOptionText,
         displayAnswer,
-        isProvided: Boolean(rawAns)
+        isProvided: Boolean(rawAns),
+        explanation
       };
     }
 
@@ -671,7 +678,8 @@ export function resolveSolvedItem(section, item, idx) {
         sentence,
         answer: meaning + (sentence ? ` (Sentence: ${sentence})` : ''),
         displayAnswer: sentence ? `${meaning} | Sentence: ${sentence}` : meaning,
-        isProvided: Boolean(item.meaning || item.answer)
+        isProvided: Boolean(item.meaning || item.answer),
+        explanation
       };
     }
 
@@ -687,7 +695,8 @@ export function resolveSolvedItem(section, item, idx) {
         passage,
         answer,
         displayAnswer: answer,
-        isProvided: Boolean(rawAns)
+        isProvided: Boolean(rawAns),
+        explanation
       };
     }
 
@@ -709,7 +718,8 @@ export function resolveSolvedItem(section, item, idx) {
         correctChoice,
         correctSentence,
         displayAnswer: `✓ [${correctChoice}] ${correctSentence}`,
-        isProvided: Boolean(rawAns)
+        isProvided: Boolean(rawAns),
+        explanation
       };
     }
 
@@ -721,7 +731,8 @@ export function resolveSolvedItem(section, item, idx) {
         question: item.prompt || '',
         answer: rawAns || '(No answer provided)',
         displayAnswer: rawAns || '(No answer provided)',
-        isProvided: Boolean(rawAns)
+        isProvided: Boolean(rawAns),
+        explanation
       };
     }
   }
@@ -730,49 +741,65 @@ export function resolveSolvedItem(section, item, idx) {
 // Estimate height for solved Answer Key items in mm
 export function estimateSolvedItemHeightMm(section, item, idx) {
   const solved = resolveSolvedItem(section, item, idx);
+  let baseHeight = 10.0;
   switch (section.type) {
     case 'short_qa':
     case 'math_box': {
       const qLines = Math.max(1, Math.ceil(((solved.question || '').length + 4) / 85));
       const aLines = Math.max(1, Math.ceil(((solved.answer || '').length + 8) / 80));
-      return qLines * 4.6 + aLines * 4.4 + 4.5;
+      baseHeight = qLines * 4.6 + aLines * 4.4 + 4.5;
+      break;
     }
     case 'fill_blanks': {
       const lines = Math.max(1, Math.ceil(((solved.fullSentence || '').length + 4) / 85));
-      return lines * 5.0 + 3.0;
+      baseHeight = lines * 5.0 + 3.0;
+      break;
     }
     case 'true_false': {
       const lines = Math.max(1, Math.ceil(((solved.question || '').length + 18) / 80));
-      return lines * 4.8 + 2.5;
+      baseHeight = lines * 4.8 + 2.5;
+      break;
     }
     case 'matching': {
       const lines = Math.max(1, Math.ceil(((solved.question || '').length + (solved.displayAnswer || '').length + 8) / 80));
-      return lines * 4.8 + 2.5;
+      baseHeight = lines * 4.8 + 2.5;
+      break;
     }
     case 'mcq': {
       const qLines = Math.max(1, Math.ceil(((solved.question || '').length + 4) / 85));
       const optRows = Math.ceil(((solved.options || []).length || 2) / 2);
-      return qLines * 4.6 + optRows * 4.8 + 3.5;
+      baseHeight = qLines * 4.6 + optRows * 4.8 + 3.5;
+      break;
     }
     case 'word_meaning': {
       const mainLines = Math.max(1, Math.ceil(((solved.word || '').length + (solved.meaning || '').length + 6) / 80));
       const sLines = solved.sentence ? Math.max(1, Math.ceil(((solved.sentence || '').length + 12) / 80)) : 0;
-      return mainLines * 4.6 + (sLines ? sLines * 4.2 + 2 : 0) + 4.0;
+      baseHeight = mainLines * 4.6 + (sLines ? sLines * 4.2 + 2 : 0) + 4.0;
+      break;
     }
     case 'passage_cloze': {
       const pLines = Math.max(1, Math.ceil((solved.passage || '').length / 85));
       const aLines = Math.max(1, Math.ceil(((solved.answer || '').length + 10) / 80));
-      return pLines * 4.5 + aLines * 4.4 + 6.0;
+      baseHeight = pLines * 4.5 + aLines * 4.4 + 6.0;
+      break;
     }
     case 'tick_sentence': {
       const aLines = Math.max(1, Math.ceil(((solved.questionA || '').length + 8) / 80));
       const bLines = Math.max(1, Math.ceil(((solved.questionB || '').length + 8) / 80));
-      return 4.5 + aLines * 4.4 + bLines * 4.4 + 4.0;
+      baseHeight = 4.5 + aLines * 4.4 + bLines * 4.4 + 4.0;
+      break;
     }
     default: {
-      return 10.0;
+      baseHeight = 10.0;
+      break;
     }
   }
+
+  const explanationHeight = solved.explanation
+    ? Math.max(1, Math.ceil((solved.explanation.length + 12) / 78)) * 4.4 + 2.2
+    : 0;
+
+  return baseHeight + explanationHeight;
 }
 
 // Independent Multi-Page Answer Key Pagination
@@ -905,175 +932,199 @@ export function SolvedItemCard({ section, item, idx, startIndex = 0 }) {
   const solved = resolveSolvedItem(section, item, idx);
   const itemNumber = startIndex + idx + 1;
 
-  switch (section.type) {
-    case 'short_qa':
-    case 'math_box': {
-      return (
-        <div className="text-xs text-slate-900">
-          <div className="flex items-baseline gap-1.5 font-semibold text-slate-800 mb-0.5">
-            <span className="font-bold shrink-0">{itemNumber}.</span>
-            <span>{solved.question}</span>
-          </div>
-          <div className="pl-4 text-indigo-950 font-medium bg-slate-50 border-l-2 border-indigo-500 py-1 px-2 rounded-r">
-            <span className="font-bold text-indigo-700 mr-1.5">Ans:</span>
-            <span>{solved.answer}</span>
-          </div>
-        </div>
-      );
-    }
-
-    case 'fill_blanks': {
-      return (
-        <div className="text-xs text-slate-900 leading-relaxed">
-          <span className="font-bold mr-1.5 shrink-0">{itemNumber}.</span>
-          {solved.parts.map((part, pIdx) =>
-            part.isAnswer ? (
-              <span key={pIdx} className="font-bold underline decoration-indigo-600 decoration-2 px-0.5 text-indigo-950">
-                {part.text}
-              </span>
-            ) : part.isBlank ? (
-              <span key={pIdx} className="inline-block border-b-2 border-slate-900 mx-1 min-w-[36px]">
-                &nbsp;
-              </span>
-            ) : (
-              <span key={pIdx}>{part.text}</span>
-            )
-          )}
-        </div>
-      );
-    }
-
-    case 'true_false': {
-      return (
-        <div className="flex items-baseline justify-between gap-2 text-xs">
-          <div className="flex items-baseline gap-1.5">
-            <span className="font-bold shrink-0">{itemNumber}.</span>
-            <span className="text-slate-800">{solved.question}</span>
-          </div>
-          <span className="font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-900 border border-slate-300 shrink-0">
-            {solved.displayAnswer}
-          </span>
-        </div>
-      );
-    }
-
-    case 'matching': {
-      return (
-        <div className="text-xs text-slate-900 flex items-baseline gap-2">
-          <span className="font-bold shrink-0">{itemNumber}.</span>
-          <span className="font-semibold text-slate-800">{solved.question}</span>
-          <span className="text-slate-400">→</span>
-          <span className="font-bold text-indigo-900">{solved.displayAnswer}</span>
-        </div>
-      );
-    }
-
-    case 'mcq': {
-      return (
-        <div className="text-xs text-slate-900">
-          <div className="flex items-baseline gap-1.5 font-semibold text-slate-800 mb-1">
-            <span className="font-bold shrink-0">{itemNumber}.</span>
-            <span>{solved.question}</span>
-          </div>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-1 pl-4">
-            {(solved.options || []).map((opt, oIdx) => {
-              const isCorrect = oIdx === solved.resolvedIdx;
-              const letter = String.fromCharCode(97 + oIdx);
-              return (
-                <div
-                  key={oIdx}
-                  className={`flex items-center gap-1.5 py-0.5 px-2 rounded ${
-                    isCorrect
-                      ? 'bg-emerald-50 text-emerald-950 font-bold border border-emerald-300'
-                      : 'text-slate-600'
-                  }`}
-                >
-                  <span className="font-bold">{isCorrect ? '✓' : `(${letter})`}</span>
-                  <span>{isCorrect ? `(${letter}) ${opt}` : opt}</span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      );
-    }
-
-    case 'word_meaning': {
-      return (
-        <div className="text-xs text-slate-900 bg-slate-50 border border-slate-200 rounded p-2">
-          <div className="flex items-baseline gap-2 mb-1">
-            <span className="font-bold text-slate-900 shrink-0">{itemNumber}. {solved.word}:</span>
-            <span className="font-medium text-slate-800">{solved.meaning}</span>
-          </div>
-          {solved.sentence && (
-            <div className="pl-4 text-slate-600 italic">
-              <span className="font-semibold not-italic text-slate-700">Sentence: </span>
-              {solved.sentence}
+  const renderContent = () => {
+    switch (section.type) {
+      case 'short_qa':
+      case 'math_box': {
+        return (
+          <div className="text-xs text-slate-900">
+            <div className="flex items-baseline gap-1.5 font-semibold text-slate-800 mb-0.5">
+              <span className="font-bold shrink-0">{itemNumber}.</span>
+              <span>{solved.question}</span>
             </div>
-          )}
-        </div>
-      );
-    }
-
-    case 'passage_cloze': {
-      return (
-        <div className="text-xs text-slate-900">
-          <div className="mb-1 text-justify leading-relaxed text-slate-800 bg-slate-50 p-2.5 rounded border border-slate-200">
-            {solved.passage}
-          </div>
-          <div className="pl-2 font-medium text-indigo-950">
-            <span className="font-bold text-indigo-700 mr-1.5">Answer:</span>
-            <span className="font-bold underline decoration-indigo-500">{solved.answer}</span>
-          </div>
-        </div>
-      );
-    }
-
-    case 'tick_sentence': {
-      return (
-        <div className="text-xs text-slate-900">
-          <div className="font-bold text-slate-800 mb-1">{itemNumber}. Select the correct sentence:</div>
-          <div className="space-y-1 pl-4">
-            <div
-              className={`flex items-center gap-2 py-0.5 px-2 rounded ${
-                solved.correctChoice === 'A'
-                  ? 'bg-emerald-50 text-emerald-950 font-bold border border-emerald-300'
-                  : 'text-slate-600'
-              }`}
-            >
-              <span className="font-bold">{solved.correctChoice === 'A' ? '✓ [A]' : '[ ] A'}</span>
-              <span>{solved.questionA}</span>
-            </div>
-            <div
-              className={`flex items-center gap-2 py-0.5 px-2 rounded ${
-                solved.correctChoice === 'B'
-                  ? 'bg-emerald-50 text-emerald-950 font-bold border border-emerald-300'
-                  : 'text-slate-600'
-              }`}
-            >
-              <span className="font-bold">{solved.correctChoice === 'B' ? '✓ [B]' : '[ ] B'}</span>
-              <span>{solved.questionB}</span>
+            <div className="pl-4 text-indigo-950 font-medium bg-slate-50 border-l-2 border-indigo-500 py-1 px-2 rounded-r">
+              <span className="font-bold text-indigo-700 mr-1.5">Ans:</span>
+              <span>{solved.answer}</span>
             </div>
           </div>
-        </div>
-      );
-    }
+        );
+      }
 
-    default: {
-      return (
-        <div className="text-xs text-slate-900">
-          <div className="flex items-baseline gap-1.5 font-semibold text-slate-800 mb-0.5">
+      case 'fill_blanks': {
+        return (
+          <div className="text-xs text-slate-900 leading-relaxed">
+            <span className="font-bold mr-1.5 shrink-0">{itemNumber}.</span>
+            {solved.parts.map((part, pIdx) =>
+              part.isAnswer ? (
+                <span key={pIdx} className="font-bold underline decoration-indigo-600 decoration-2 px-0.5 text-indigo-950">
+                  {part.text}
+                </span>
+              ) : part.isBlank ? (
+                <span key={pIdx} className="inline-block border-b-2 border-slate-900 mx-1 min-w-[36px]">
+                  &nbsp;
+                </span>
+              ) : (
+                <span key={pIdx}>{part.text}</span>
+              )
+            )}
+          </div>
+        );
+      }
+
+      case 'true_false': {
+        return (
+          <div className="flex items-baseline justify-between gap-2 text-xs">
+            <div className="flex items-baseline gap-1.5">
+              <span className="font-bold shrink-0">{itemNumber}.</span>
+              <span className="text-slate-800">{solved.question}</span>
+            </div>
+            <span className="font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-900 border border-slate-300 shrink-0">
+              {solved.displayAnswer}
+            </span>
+          </div>
+        );
+      }
+
+      case 'matching': {
+        return (
+          <div className="text-xs text-slate-900 flex items-baseline gap-2">
             <span className="font-bold shrink-0">{itemNumber}.</span>
-            <span>{solved.question}</span>
+            <span className="font-semibold text-slate-800">{solved.question}</span>
+            <span className="text-slate-400">→</span>
+            <span className="font-bold text-indigo-900">{solved.displayAnswer}</span>
           </div>
-          <div className="pl-4 text-indigo-950 font-medium bg-slate-50 border-l-2 border-indigo-500 py-1 px-2 rounded-r">
-            <span className="font-bold text-indigo-700 mr-1.5">Ans:</span>
-            <span>{solved.answer}</span>
+        );
+      }
+
+      case 'mcq': {
+        return (
+          <div className="text-xs text-slate-900">
+            <div className="flex items-baseline gap-1.5 font-semibold text-slate-800 mb-1">
+              <span className="font-bold shrink-0">{itemNumber}.</span>
+              <span>{solved.question}</span>
+            </div>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1 pl-4">
+              {(solved.options || []).map((opt, oIdx) => {
+                const isCorrect = oIdx === solved.resolvedIdx;
+                const letter = String.fromCharCode(97 + oIdx);
+                return (
+                  <div
+                    key={oIdx}
+                    className={`flex items-center gap-1.5 py-0.5 px-2 rounded ${
+                      isCorrect
+                        ? 'bg-emerald-50 text-emerald-950 font-bold border border-emerald-300'
+                        : 'text-slate-600'
+                    }`}
+                  >
+                    <span className="font-bold">{isCorrect ? '✓' : `(${letter})`}</span>
+                    <span>{isCorrect ? `(${letter}) ${opt}` : opt}</span>
+                  </div>
+                );
+              })}
+            </div>
           </div>
-        </div>
-      );
+        );
+      }
+
+      case 'word_meaning': {
+        return (
+          <div className="text-xs text-slate-900 bg-slate-50 border border-slate-200 rounded p-2">
+            <div className="flex items-baseline gap-2 mb-1">
+              <span className="font-bold text-slate-900 shrink-0">{itemNumber}. {solved.word}:</span>
+              <span className="font-medium text-slate-800">{solved.meaning}</span>
+            </div>
+            {solved.sentence && (
+              <div className="pl-4 text-slate-600 italic">
+                <span className="font-semibold not-italic text-slate-700">Sentence: </span>
+                {solved.sentence}
+              </div>
+            )}
+          </div>
+        );
+      }
+
+      case 'passage_cloze': {
+        return (
+          <div className="text-xs text-slate-900">
+            <div className="mb-1 text-justify leading-relaxed text-slate-800 bg-slate-50 p-2.5 rounded border border-slate-200">
+              {solved.passage}
+            </div>
+            <div className="pl-2 font-medium text-indigo-950">
+              <span className="font-bold text-indigo-700 mr-1.5">Answer:</span>
+              <span className="font-bold underline decoration-indigo-500">{solved.answer}</span>
+            </div>
+          </div>
+        );
+      }
+
+      case 'tick_sentence': {
+        return (
+          <div className="text-xs text-slate-900">
+            <div className="font-bold text-slate-800 mb-1">{itemNumber}. Select the correct sentence:</div>
+            <div className="space-y-1 pl-4">
+              <div
+                className={`flex items-center gap-2 py-0.5 px-2 rounded ${
+                  solved.correctChoice === 'A'
+                    ? 'bg-emerald-50 text-emerald-950 font-bold border border-emerald-300'
+                    : 'text-slate-600'
+                }`}
+              >
+                <span className="font-bold">{solved.correctChoice === 'A' ? '✓ [A]' : '[ ] A'}</span>
+                <span>{solved.questionA}</span>
+              </div>
+              <div
+                className={`flex items-center gap-2 py-0.5 px-2 rounded ${
+                  solved.correctChoice === 'B'
+                    ? 'bg-emerald-50 text-emerald-950 font-bold border border-emerald-300'
+                    : 'text-slate-600'
+                }`}
+              >
+                <span className="font-bold">{solved.correctChoice === 'B' ? '✓ [B]' : '[ ] B'}</span>
+                <span>{solved.questionB}</span>
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      default: {
+        return (
+          <div className="text-xs text-slate-900">
+            <div className="flex items-baseline gap-1.5 font-semibold text-slate-800 mb-0.5">
+              <span className="font-bold shrink-0">{itemNumber}.</span>
+              <span>{solved.question}</span>
+            </div>
+            <div className="pl-4 text-indigo-950 font-medium bg-slate-50 border-l-2 border-indigo-500 py-1 px-2 rounded-r">
+              <span className="font-bold text-indigo-700 mr-1.5">Ans:</span>
+              <span>{solved.answer}</span>
+            </div>
+          </div>
+        );
+      }
     }
-  }
+  };
+
+  return (
+    <div>
+      {renderContent()}
+      {Boolean(solved.explanation) && (
+        <div
+          style={{
+            marginTop: '4px',
+            padding: '4px 8px',
+            backgroundColor: '#fffbeb',
+            borderLeft: '2.5px solid #d97706',
+            borderRadius: '3px',
+            fontSize: '12px',
+            lineHeight: 1.4,
+            color: '#475569'
+          }}
+        >
+          <strong>Note:</strong> {solved.explanation}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // Exact shared print and preview typography & layout stylesheet (Scoped to worksheet containers)
@@ -2681,6 +2732,8 @@ export function WafiWorksheetBuilder({
           const solved = resolveSolvedItem(section, item, idx);
           const startNum = (section.startIndex || 0) + idx + 1;
           let curY = atY;
+          let blockH = 0;
+          let lastContentBaseline = atY;
 
           switch (section.type) {
             case 'short_qa':
@@ -2689,7 +2742,7 @@ export function WafiWorksheetBuilder({
               const qLines = wrapTextLines(cCtx, qText, CONTENT_W - 4);
               const aText = `Ans: ${solved.answer}`;
               const aLines = wrapTextLines(cCtx, aText, CONTENT_W - 10);
-              const blockH = qLines.length * 4.6 + aLines.length * 4.4 + 4.5;
+              blockH = qLines.length * 4.6 + aLines.length * 4.4 + 4.5;
               if (!isDryRun) {
                 cCtx.fillStyle = '#0f172a';
                 cCtx.font = `600 3.8px ${fontStack}`;
@@ -2703,28 +2756,30 @@ export function WafiWorksheetBuilder({
                 aLines.forEach((line, lIdx) => {
                   cCtx.fillText(line, MARGIN_LEFT + 5, curY + lIdx * 4.4);
                 });
+                lastContentBaseline = curY + (aLines.length - 1) * 4.4;
               }
-              return blockH;
+              break;
             }
 
             case 'fill_blanks': {
               const fullText = `${startNum}. ${solved.fullSentence}`;
               const lines = wrapTextLines(cCtx, fullText, CONTENT_W - 4);
-              const blockH = lines.length * 4.8 + 2.5;
+              blockH = lines.length * 4.8 + 2.5;
               if (!isDryRun) {
                 cCtx.fillStyle = '#020617';
                 cCtx.font = `500 3.8px ${fontStack}`;
                 lines.forEach((line, lIdx) => {
                   cCtx.fillText(line, MARGIN_LEFT, curY + lIdx * 4.8);
                 });
+                lastContentBaseline = curY + (lines.length - 1) * 4.8;
               }
-              return blockH;
+              break;
             }
 
             case 'true_false': {
               const promptText = `${startNum}. ${solved.question}`;
               const pLines = wrapTextLines(cCtx, promptText, CONTENT_W - 24);
-              const blockH = pLines.length * 4.8 + 2.5;
+              blockH = pLines.length * 4.8 + 2.5;
               if (!isDryRun) {
                 cCtx.fillStyle = '#020617';
                 cCtx.font = `400 3.8px ${fontStack}`;
@@ -2736,22 +2791,24 @@ export function WafiWorksheetBuilder({
                 cCtx.textAlign = 'right';
                 cCtx.fillText(solved.displayAnswer, MARGIN_LEFT + CONTENT_W, curY);
                 cCtx.textAlign = 'left';
+                lastContentBaseline = curY + (pLines.length - 1) * 4.8;
               }
-              return blockH;
+              break;
             }
 
             case 'matching': {
               const matchText = `${startNum}. ${solved.question}  →  ${solved.displayAnswer}`;
               const lines = wrapTextLines(cCtx, matchText, CONTENT_W - 4);
-              const blockH = lines.length * 4.8 + 2.0;
+              blockH = lines.length * 4.8 + 2.0;
               if (!isDryRun) {
                 cCtx.fillStyle = '#020617';
                 cCtx.font = `500 3.8px ${fontStack}`;
                 lines.forEach((line, lIdx) => {
                   cCtx.fillText(line, MARGIN_LEFT, curY + lIdx * 4.8);
                 });
+                lastContentBaseline = curY + (lines.length - 1) * 4.8;
               }
-              return blockH;
+              break;
             }
 
             case 'mcq': {
@@ -2759,7 +2816,7 @@ export function WafiWorksheetBuilder({
               const pLines = wrapTextLines(cCtx, promptText, CONTENT_W - 4);
               const opts = solved.options || [];
               const rows = Math.ceil(opts.length / 2);
-              const blockH = pLines.length * 4.6 + Math.max(1, rows) * 4.8 + 3.0;
+              blockH = pLines.length * 4.6 + Math.max(1, rows) * 4.8 + 3.0;
               if (!isDryRun) {
                 cCtx.fillStyle = '#0f172a';
                 cCtx.font = `600 3.8px ${fontStack}`;
@@ -2781,15 +2838,16 @@ export function WafiWorksheetBuilder({
                   cCtx.font = isCorrect ? `700 3.6px ${fontStack}` : `400 3.6px ${fontStack}`;
                   cCtx.fillText(isCorrect ? `✓ (${letter}) ${opt}` : `(${letter}) ${opt}`, ox, oy);
                 });
+                lastContentBaseline = curY + (Math.max(1, rows) - 1) * 4.8;
               }
-              return blockH;
+              break;
             }
 
             case 'word_meaning': {
               const mainText = `${startNum}. ${solved.word}: ${solved.meaning}`;
               const mLines = wrapTextLines(cCtx, mainText, CONTENT_W - 4);
               const sLines = solved.sentence ? wrapTextLines(cCtx, `Sentence: ${solved.sentence}`, CONTENT_W - 10) : [];
-              const blockH = mLines.length * 4.6 + (sLines.length ? sLines.length * 4.2 + 1.5 : 0) + 2.5;
+              blockH = mLines.length * 4.6 + (sLines.length ? sLines.length * 4.2 + 1.5 : 0) + 2.5;
               if (!isDryRun) {
                 cCtx.fillStyle = '#0f172a';
                 cCtx.font = `600 3.8px ${fontStack}`;
@@ -2803,15 +2861,18 @@ export function WafiWorksheetBuilder({
                   sLines.forEach((line, lIdx) => {
                     cCtx.fillText(line, MARGIN_LEFT + 5, curY + lIdx * 4.2);
                   });
+                  lastContentBaseline = curY + (sLines.length - 1) * 4.2;
+                } else {
+                  lastContentBaseline = curY + (mLines.length - 1) * 4.6;
                 }
               }
-              return blockH;
+              break;
             }
 
             case 'passage_cloze': {
               const pLines = wrapTextLines(cCtx, solved.passage, CONTENT_W - 4);
               const aLines = wrapTextLines(cCtx, `Answer: ${solved.answer}`, CONTENT_W - 8);
-              const blockH = pLines.length * 4.5 + aLines.length * 4.4 + 4.5;
+              blockH = pLines.length * 4.5 + aLines.length * 4.4 + 4.5;
               if (!isDryRun) {
                 cCtx.fillStyle = '#334155';
                 cCtx.font = `400 3.6px ${fontStack}`;
@@ -2825,8 +2886,9 @@ export function WafiWorksheetBuilder({
                 aLines.forEach((line, lIdx) => {
                   cCtx.fillText(line, MARGIN_LEFT + 4, curY + lIdx * 4.4);
                 });
+                lastContentBaseline = curY + (aLines.length - 1) * 4.4;
               }
-              return blockH;
+              break;
             }
 
             case 'tick_sentence': {
@@ -2835,7 +2897,7 @@ export function WafiWorksheetBuilder({
               const textB = `${solved.correctChoice === 'B' ? '✓ [B]' : '[ ] B'} ${solved.questionB}`;
               const linesA = wrapTextLines(cCtx, textA, CONTENT_W - 8);
               const linesB = wrapTextLines(cCtx, textB, CONTENT_W - 8);
-              const blockH = 4.5 + linesA.length * 4.4 + linesB.length * 4.4 + 3.0;
+              blockH = 4.5 + linesA.length * 4.4 + linesB.length * 4.4 + 3.0;
               if (!isDryRun) {
                 cCtx.fillStyle = '#0f172a';
                 cCtx.font = `600 3.7px ${fontStack}`;
@@ -2854,15 +2916,16 @@ export function WafiWorksheetBuilder({
                 linesB.forEach((line, lIdx) => {
                   cCtx.fillText(line, MARGIN_LEFT + 4, curY + lIdx * 4.4);
                 });
+                lastContentBaseline = curY + (linesB.length - 1) * 4.4;
               }
-              return blockH;
+              break;
             }
 
             default: {
               const qText = `${startNum}. ${solved.question}`;
               const qLines = wrapTextLines(cCtx, qText, CONTENT_W - 4);
               const aLines = wrapTextLines(cCtx, `Ans: ${solved.answer}`, CONTENT_W - 10);
-              const blockH = qLines.length * 4.6 + aLines.length * 4.4 + 3.5;
+              blockH = qLines.length * 4.6 + aLines.length * 4.4 + 3.5;
               if (!isDryRun) {
                 cCtx.fillStyle = '#0f172a';
                 cCtx.font = `600 3.8px ${fontStack}`;
@@ -2876,10 +2939,42 @@ export function WafiWorksheetBuilder({
                 aLines.forEach((line, lIdx) => {
                   cCtx.fillText(line, MARGIN_LEFT + 5, curY + lIdx * 4.4);
                 });
+                lastContentBaseline = curY + (aLines.length - 1) * 4.4;
               }
-              return blockH;
+              break;
             }
           }
+
+          if (solved.explanation) {
+            cCtx.font = `italic 400 3.2px ${fontStack}`;
+            const noteLines = wrapTextLines(cCtx, `Note: ${solved.explanation}`, CONTENT_W - 14);
+            const noteLineH = 3.6;
+            const notePadY = 2.0;
+            const noteBoxH = noteLines.length * noteLineH + notePadY;
+            const noteTopMargin = 1.8;
+            blockH += noteBoxH + noteTopMargin;
+
+            if (!isDryRun) {
+              const boxY = lastContentBaseline + 2.0;
+              const boxX = MARGIN_LEFT + 2;
+              const boxW = CONTENT_W - 4;
+
+              cCtx.fillStyle = '#fffbeb';
+              cCtx.fillRect(boxX, boxY, boxW, noteBoxH);
+
+              cCtx.fillStyle = '#d97706';
+              cCtx.fillRect(boxX, boxY, 0.7, noteBoxH);
+
+              cCtx.fillStyle = '#475569';
+              cCtx.font = `italic 400 3.2px ${fontStack}`;
+              cCtx.textAlign = 'left';
+              noteLines.forEach((line, lIdx) => {
+                cCtx.fillText(line, boxX + 2.6, boxY + 2.8 + lIdx * noteLineH);
+              });
+            }
+          }
+
+          return blockH;
         };
 
         // --- Pass 1: Dry run to determine total Answer Key pages ---
@@ -4093,6 +4188,14 @@ export function WafiWorksheetBuilder({
                           className="block w-full rounded border border-slate-300 px-2 py-1 text-xs"
                           rows={2}
                         />
+
+                        <textarea
+                          placeholder="Note / Explanation (optional)..."
+                          value={item.explanation || ''}
+                          onChange={(e) => updateItem(section.id, item.id, { explanation: e.target.value })}
+                          className="mt-1.5 block w-full rounded border border-amber-200 bg-amber-50/40 px-2 py-1 text-xs text-slate-700 placeholder:text-slate-400 focus:border-amber-400 focus:outline-none"
+                          rows={1}
+                        />
                       </div>
                     ))}
 
@@ -5240,12 +5343,16 @@ export function WafiWorksheetBuilder({
                   <div
                     data-ak-measure-header="page1"
                     className="border-b-2 border-slate-900 pb-2 mb-4 flex justify-between items-center"
+                    style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #0f172a', paddingBottom: '8px', marginBottom: '14px' }}
                   >
                     <div>
                       <h2 className="text-lg font-bold uppercase tracking-wide">Answer Key</h2>
                       <p className="text-xs text-slate-600">{worksheet.header?.chapter || 'Chapter'}</p>
                     </div>
-                    <span className="text-xs font-semibold px-2 py-1 bg-amber-100 text-amber-800 rounded">
+                    <span
+                      className="text-xs font-semibold px-2 py-1 bg-amber-100 text-amber-800 rounded"
+                      style={{ fontSize: '11px', fontWeight: 600, padding: '3px 8px', backgroundColor: '#fef3c7', color: '#92400e', borderRadius: '4px' }}
+                    >
                       Teacher / Parent Reference
                     </span>
                   </div>
@@ -5254,6 +5361,7 @@ export function WafiWorksheetBuilder({
                   <div
                     data-ak-measure-header="cont"
                     className="border-b-2 border-slate-900 pb-2 mb-4 flex justify-between items-center"
+                    style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #0f172a', paddingBottom: '8px', marginBottom: '14px' }}
                   >
                     <div>
                       <h2 className="text-lg font-bold uppercase tracking-wide">
@@ -5261,7 +5369,10 @@ export function WafiWorksheetBuilder({
                       </h2>
                       <p className="text-xs text-slate-600">{worksheet.header?.chapter || 'Chapter'}</p>
                     </div>
-                    <span className="text-xs font-semibold px-2 py-1 bg-amber-100 text-amber-800 rounded">
+                    <span
+                      className="text-xs font-semibold px-2 py-1 bg-amber-100 text-amber-800 rounded"
+                      style={{ fontSize: '11px', fontWeight: 600, padding: '3px 8px', backgroundColor: '#fef3c7', color: '#92400e', borderRadius: '4px' }}
+                    >
                       Teacher / Parent Reference
                     </span>
                   </div>
@@ -5308,7 +5419,10 @@ export function WafiWorksheetBuilder({
                   >
                     <div style={{ overflow: 'hidden' }}>
                       {/* Header */}
-                      <div className="border-b-2 border-slate-900 pb-2 mb-4 flex justify-between items-center">
+                      <div
+                        className="border-b-2 border-slate-900 pb-2 mb-4 flex justify-between items-center"
+                        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #0f172a', paddingBottom: '8px', marginBottom: '14px' }}
+                      >
                         <div>
                           <h2 className="text-lg font-bold uppercase tracking-wide">
                             Answer Key{' '}
@@ -5318,7 +5432,10 @@ export function WafiWorksheetBuilder({
                           </h2>
                           <p className="text-xs text-slate-600">{worksheet.header?.chapter || 'Chapter'}</p>
                         </div>
-                        <span className="text-xs font-semibold px-2 py-1 bg-amber-100 text-amber-800 rounded">
+                        <span
+                          className="text-xs font-semibold px-2 py-1 bg-amber-100 text-amber-800 rounded"
+                          style={{ fontSize: '11px', fontWeight: 600, padding: '3px 8px', backgroundColor: '#fef3c7', color: '#92400e', borderRadius: '4px' }}
+                        >
                           Teacher / Parent Reference
                         </span>
                       </div>
